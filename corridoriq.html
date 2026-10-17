@@ -1,0 +1,1025 @@
+<title>CorridorIQ Payment Routing</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@75..100,500..800&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<style>
+/* Layout: treasury operations console. Requirement rail on the left, ranked corridors and evidence on the right, human certification at the foot. */
+:root{
+  --bg:#EDF1F0; --surface:#FFFFFF; --sunk:#F4F7F6; --ink:#0F1E1B; --muted:#55655F; --faint:#7E8C87; --line:#D4DDD9; --line-strong:#B9C6C1;
+  --accent:#0D5A6A; --accent-ink:#FFFFFF; --accent-soft:#DCEAED;
+  --cost:#A3531A; --speed:#2556A0;
+  --good:#24724A; --good-soft:#DFF0E6; --warn:#8F5B0C; --warn-soft:#F6EAD3; --bad:#AE2A20; --bad-soft:#F6DFDB;
+  --hatch:#DFE6E3; --focus:#2556A0;
+  --f-display:"Archivo","Arial Narrow",system-ui,sans-serif;
+  --f-body:"IBM Plex Sans",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  --f-mono:"IBM Plex Mono",ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  --r:8px;
+}
+@media (prefers-color-scheme: dark){ :root:not([data-theme="light"]){
+  --bg:#0C1413; --surface:#131E1C; --sunk:#0F1817; --ink:#E4ECEA; --muted:#9AABA6; --faint:#76877F; --line:#24332F; --line-strong:#33453F;
+  --accent:#5CB6C7; --accent-ink:#06191D; --accent-soft:#16343A;
+  --cost:#E2995A; --speed:#7DA9EA;
+  --good:#5FC08A; --good-soft:#143023; --warn:#E0AE55; --warn-soft:#33270F; --bad:#F07E72; --bad-soft:#3A1916;
+  --hatch:#1C2826; --focus:#7DA9EA; color-scheme:dark }}
+:root[data-theme="dark"]{
+  --bg:#0C1413; --surface:#131E1C; --sunk:#0F1817; --ink:#E4ECEA; --muted:#9AABA6; --faint:#76877F; --line:#24332F; --line-strong:#33453F;
+  --accent:#5CB6C7; --accent-ink:#06191D; --accent-soft:#16343A;
+  --cost:#E2995A; --speed:#7DA9EA;
+  --good:#5FC08A; --good-soft:#143023; --warn:#E0AE55; --warn-soft:#33270F; --bad:#F07E72; --bad-soft:#3A1916;
+  --hatch:#1C2826; --focus:#7DA9EA; color-scheme:dark }
+
+*{box-sizing:border-box}
+body{background:var(--bg);color:var(--ink);font-family:var(--f-body);font-size:14px;line-height:1.5}
+.mono,.num{font-family:var(--f-mono);font-variant-numeric:tabular-nums}
+.num{font-size:.95em}
+h1,h2,h3{font-family:var(--f-display);font-stretch:85%;margin:0;text-wrap:balance;letter-spacing:-.01em}
+h2{font-size:1.25rem;font-weight:700}
+h3{font-size:1rem;font-weight:700}
+p{margin:0}
+button,input,select,textarea{font:inherit;color:inherit}
+:focus-visible{outline:2px solid var(--focus);outline-offset:2px}
+.eyebrow{font-family:var(--f-mono);font-size:.7rem;letter-spacing:.09em;text-transform:uppercase;color:var(--muted)}
+.muted{color:var(--muted)}
+.wrap{max-width:1360px;margin:0 auto;padding-inline:clamp(16px,2.4vw,28px)}
+
+/* top bar */
+.topbar{position:sticky;top:env(safe-area-inset-top,0px);z-index:20;background:var(--surface);border-bottom:1px solid var(--line)}
+.topbar .wrap{display:flex;align-items:center;gap:20px;flex-wrap:wrap;padding-block:10px}
+.brand{display:flex;align-items:center;gap:10px}
+.mark{width:30px;height:30px;border-radius:7px;background:var(--accent);display:grid;place-items:center}
+.mark svg{display:block}
+.brand b{font-family:var(--f-display);font-stretch:80%;font-size:1.25rem;font-weight:800;letter-spacing:-.01em}
+.brand small{display:block;font-size:.7rem;color:var(--muted);line-height:1.1}
+.tabs{display:flex;gap:2px;background:var(--sunk);border:1px solid var(--line);border-radius:8px;padding:3px}
+.tab{border:0;background:transparent;padding:6px 12px;border-radius:6px;cursor:pointer;color:var(--muted);font-weight:500;white-space:nowrap}
+.tab[aria-selected="true"]{background:var(--surface);color:var(--ink);box-shadow:0 1px 2px rgb(0 0 0 / .08)}
+.topmeta{margin-left:auto;display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+.pill{display:inline-flex;align-items:center;gap:5px;border-radius:999px;padding:2px 9px;font-size:.72rem;font-weight:600;border:1px solid transparent;white-space:nowrap;line-height:1.6}
+.pill.test{background:var(--warn-soft);color:var(--warn);border-color:color-mix(in srgb,var(--warn) 30%,transparent)}
+.pill.good{background:var(--good-soft);color:var(--good)}
+.pill.warn{background:var(--warn-soft);color:var(--warn)}
+.pill.bad{background:var(--bad-soft);color:var(--bad)}
+.pill.info{background:var(--accent-soft);color:var(--accent)}
+.pill.plain{background:var(--sunk);color:var(--muted);border-color:var(--line)}
+
+/* scenarios */
+.scen{padding-block:18px 6px;display:grid;gap:10px}
+.scen-head{display:flex;align-items:baseline;gap:12px;flex-wrap:wrap}
+.scen-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px}
+.scen-btn{text-align:left;background:var(--surface);border:1px solid var(--line);border-radius:var(--r);padding:11px 13px;cursor:pointer;display:grid;gap:3px;transition:border-color .15s}
+.scen-btn:hover{border-color:var(--line-strong)}
+.scen-btn[aria-pressed="true"]{border-color:var(--accent);box-shadow:inset 0 0 0 1px var(--accent)}
+.scen-btn .k{font-family:var(--f-mono);font-size:.68rem;color:var(--accent);letter-spacing:.06em;text-transform:uppercase}
+.scen-btn b{font-weight:600;font-size:.92rem}
+.scen-btn span{font-size:.78rem;color:var(--muted)}
+
+/* layout */
+.layout{display:grid;grid-template-columns:minmax(0,380px) minmax(0,1fr);gap:18px;padding-block:12px 40px;align-items:start}
+.rail{position:sticky;top:calc(env(safe-area-inset-top,0px) + 66px);display:grid;gap:14px;max-height:calc(100vh - 80px);overflow:auto;padding-bottom:4px}
+.main{display:grid;gap:16px;min-width:0}
+.panel{background:var(--surface);border:1px solid var(--line);border-radius:var(--r)}
+.panel-h{display:flex;align-items:center;gap:10px;justify-content:space-between;padding:12px 16px;border-bottom:1px solid var(--line);flex-wrap:wrap}
+.panel-b{padding:14px 16px}
+.step{display:inline-grid;place-items:center;width:20px;height:20px;border-radius:50%;background:var(--accent);color:var(--accent-ink);font-family:var(--f-mono);font-size:.7rem;font-weight:500;flex:none}
+.ph{display:flex;align-items:center;gap:9px}
+
+/* form */
+.field{display:grid;gap:4px}
+.field label,.lbl{font-size:.74rem;font-weight:600;color:var(--muted)}
+.input,select.input,textarea.input{width:100%;background:var(--sunk);border:1px solid var(--line);border-radius:6px;padding:7px 9px;min-width:0}
+textarea.input{resize:vertical;min-height:84px;line-height:1.45;background:var(--surface)}
+.input:focus{border-color:var(--accent)}
+.row2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.seg{display:flex;background:var(--sunk);border:1px solid var(--line);border-radius:6px;padding:2px}
+.seg button{flex:1;border:0;background:transparent;padding:5px 6px;border-radius:4px;cursor:pointer;color:var(--muted);font-size:.82rem;font-weight:500}
+.seg button[aria-pressed="true"]{background:var(--surface);color:var(--ink);box-shadow:0 1px 2px rgb(0 0 0 / .1)}
+.btn{border:1px solid var(--line-strong);background:var(--surface);border-radius:6px;padding:7px 12px;cursor:pointer;font-weight:600;font-size:.85rem;display:inline-flex;gap:6px;align-items:center;justify-content:center}
+.btn:hover{background:var(--sunk)}
+.btn.primary{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
+.btn.primary:hover{filter:brightness(1.07)}
+.btn.danger{color:var(--bad)}
+.btn[disabled]{opacity:.45;cursor:not-allowed;filter:none}
+.btn.sm{padding:4px 9px;font-size:.78rem}
+.chips{display:flex;flex-wrap:wrap;gap:6px}
+.chip{font-size:.75rem;background:var(--accent-soft);color:var(--ink);border-radius:5px;padding:3px 7px}
+.chip b{font-weight:600;color:var(--accent)}
+.slider{display:grid;gap:4px}
+.slider input{width:100%;accent-color:var(--accent)}
+.slider .ends{display:flex;justify-content:space-between;font-size:.72rem;font-weight:600}
+.slider .ends span:first-child{color:var(--cost)} .slider .ends span:last-child{color:var(--speed)}
+.corr{display:grid;gap:2px}
+.corr-row{display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:8px;align-items:center;padding:6px 4px;border-bottom:1px dashed var(--line)}
+.corr-row:last-child{border-bottom:0}
+.corr-row .nm{font-size:.82rem;font-weight:500;line-height:1.25}
+.corr-row .nm small{display:block;color:var(--muted);font-weight:400;font-size:.72rem}
+.star{border:0;background:transparent;cursor:pointer;color:var(--faint);font-size:1rem;padding:2px 4px;line-height:1}
+.star[aria-pressed="true"]{color:var(--warn)}
+.toggle{display:flex;gap:9px;align-items:flex-start;font-size:.8rem;cursor:pointer}
+.toggle input{margin-top:3px;accent-color:var(--accent)}
+
+/* summary */
+.hero{display:grid;grid-template-columns:minmax(0,1.5fr) minmax(0,1fr);gap:0}
+.hero-l{padding:16px 18px;display:grid;gap:10px;border-right:1px solid var(--line)}
+.hero-r{padding:16px 18px;display:grid;gap:8px;align-content:start;background:var(--sunk);border-radius:0 var(--r) var(--r) 0}
+.hero h2{font-size:1.55rem;line-height:1.15}
+.hero h2 em{font-style:normal;color:var(--accent)}
+.kpis{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px}
+.kpi{display:grid;gap:1px}
+.kpi .v{font-family:var(--f-mono);font-size:1.02rem;font-weight:500;font-variant-numeric:tabular-nums}
+.kpi .l{font-size:.7rem;color:var(--muted)}
+.kv{display:flex;justify-content:space-between;gap:10px;font-size:.8rem;border-bottom:1px dashed var(--line);padding-block:3px}
+.kv:last-child{border-bottom:0}
+.kv span:last-child{font-family:var(--f-mono);font-variant-numeric:tabular-nums;text-align:right}
+.callout{display:flex;gap:10px;align-items:flex-start;padding:10px 12px;border-radius:6px;font-size:.82rem;line-height:1.45}
+.callout.warn{background:var(--warn-soft);color:var(--ink)} .callout.warn b{color:var(--warn)}
+.callout.bad{background:var(--bad-soft)} .callout.bad b{color:var(--bad)}
+.callout.info{background:var(--accent-soft)} .callout.info b{color:var(--accent)}
+.callout .grow{flex:1;min-width:0}
+
+/* routes */
+.routes{display:grid;gap:8px}
+.rc{display:grid;grid-template-columns:34px minmax(0,1.6fr) repeat(3,minmax(0,1fr)) minmax(0,1.1fr);gap:12px;align-items:center;padding:11px 14px;border:1px solid var(--line);border-radius:var(--r);background:var(--surface);cursor:pointer;text-align:left;width:100%;position:relative}
+.rc:hover{border-color:var(--line-strong)}
+.rc[aria-pressed="true"]{border-color:var(--accent);box-shadow:inset 0 0 0 1px var(--accent)}
+.rc.off{cursor:default;background:var(--sunk)}
+.rc.off .rname,.rc.off .rv{color:var(--muted)}
+.rank{font-family:var(--f-display);font-stretch:75%;font-size:1.5rem;font-weight:800;color:var(--accent);text-align:center;line-height:1}
+.rc.off .rank{color:var(--faint);font-size:1rem}
+.rname{font-weight:600;font-size:.92rem;line-height:1.25}
+.rname small{display:block;font-weight:400;color:var(--muted);font-size:.75rem}
+.rv{font-family:var(--f-mono);font-variant-numeric:tabular-nums;font-size:.88rem;line-height:1.3}
+.rv small{display:block;font-family:var(--f-body);font-size:.68rem;color:var(--muted)}
+.score{display:grid;gap:4px}
+.bar{height:6px;background:var(--hatch);border-radius:3px;overflow:hidden}
+.bar i{display:block;height:100%;background:var(--accent);border-radius:3px}
+.badges{display:flex;gap:4px;flex-wrap:wrap}
+.reason{grid-column:2 / -1;font-size:.78rem;color:var(--bad);display:flex;gap:6px;flex-wrap:wrap;align-items:baseline}
+.reason .muted{color:var(--muted)}
+.rc-head{display:grid;grid-template-columns:34px minmax(0,1.6fr) repeat(3,minmax(0,1fr)) minmax(0,1.1fr);gap:12px;padding:0 14px;font-size:.68rem;color:var(--muted);font-family:var(--f-mono);letter-spacing:.06em;text-transform:uppercase}
+
+/* charts & grids */
+.two{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:16px}
+.chart-wrap{overflow-x:auto}
+svg text{font-family:var(--f-mono)}
+.cal{overflow-x:auto}
+.cal table{border-collapse:separate;border-spacing:2px;font-size:.7rem;width:100%;min-width:520px}
+.cal th{font-weight:500;color:var(--muted);font-family:var(--f-mono);padding:2px;text-align:center;white-space:nowrap}
+.cal th.rowh{text-align:left;font-family:var(--f-body);font-weight:600;color:var(--ink);padding-right:8px}
+.cal td{height:26px;border-radius:3px;background:var(--sunk);border:1px solid var(--line);text-align:center;position:relative}
+.cal td.we{background:repeating-linear-gradient(135deg,var(--hatch) 0 4px,transparent 4px 8px);border-color:var(--line)}
+.cal td.hol{background:var(--warn-soft);border-color:color-mix(in srgb,var(--warn) 45%,transparent)}
+.cal td.vd{box-shadow:inset 0 0 0 2px var(--accent)}
+.cal td.arr::after{content:"";position:absolute;inset:auto 0 2px 0;margin:auto;width:8px;height:8px;border-radius:50%;background:var(--good)}
+.cal th.vdh{color:var(--accent);font-weight:600}
+.legend{display:flex;gap:14px;flex-wrap:wrap;font-size:.72rem;color:var(--muted);margin-top:8px}
+.legend i{display:inline-block;width:12px;height:12px;border-radius:2px;vertical-align:-2px;margin-right:5px;border:1px solid var(--line)}
+
+/* hop diagram */
+.hops{display:flex;align-items:stretch;gap:0;overflow-x:auto;padding-bottom:6px}
+.hop{min-width:168px;flex:1;border:1px solid var(--line);border-radius:var(--r);padding:10px 11px;display:grid;gap:4px;align-content:start;background:var(--surface)}
+.hop.delay{border-color:color-mix(in srgb,var(--warn) 55%,transparent);background:linear-gradient(var(--warn-soft),var(--warn-soft)) top/100% 3px no-repeat,var(--surface)}
+.hop .cc{font-family:var(--f-mono);font-size:.68rem;color:var(--muted);letter-spacing:.05em}
+.hop b{font-size:.84rem;line-height:1.2}
+.hop .role{font-size:.7rem;color:var(--accent);font-weight:600}
+.hop .t{font-family:var(--f-mono);font-size:.74rem;font-variant-numeric:tabular-nums}
+.hop .d{font-size:.7rem;color:var(--warn)}
+.link{min-width:92px;display:grid;place-items:center;align-content:center;gap:2px;padding:0 4px;text-align:center}
+.link .ln{width:100%;height:2px;background:var(--line-strong);position:relative}
+.link .ln::after{content:"";position:absolute;right:-1px;top:-4px;border:5px solid transparent;border-left:7px solid var(--line-strong);border-right:0}
+.link span{font-size:.64rem;color:var(--muted);font-family:var(--f-mono);line-height:1.2}
+.contrib{display:grid;gap:6px}
+.crow{display:grid;grid-template-columns:150px minmax(0,1fr) 46px;gap:8px;align-items:center;font-size:.78rem}
+.ctrack{height:10px;position:relative;background:var(--sunk);border-radius:2px}
+.ctrack::before{content:"";position:absolute;left:50%;top:-2px;bottom:-2px;width:1px;background:var(--line-strong)}
+.ctrack i{position:absolute;top:0;bottom:0;border-radius:2px}
+.crow .num{text-align:right}
+
+table.data{width:100%;border-collapse:collapse;font-size:.8rem}
+table.data th{text-align:left;font-weight:600;color:var(--muted);font-size:.7rem;text-transform:uppercase;letter-spacing:.05em;padding:7px 8px;border-bottom:1px solid var(--line-strong);white-space:nowrap}
+table.data td{padding:7px 8px;border-bottom:1px solid var(--line);vertical-align:top}
+table.data td.r,table.data th.r{text-align:right}
+table.data tr.hl td{background:var(--accent-soft)}
+.tscroll{overflow-x:auto}
+
+/* approval */
+.checks{display:grid;gap:0}
+.chk{display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:10px;align-items:start;padding:9px 0;border-bottom:1px solid var(--line)}
+.chk:last-child{border-bottom:0}
+.chk input{margin-top:3px;width:16px;height:16px;accent-color:var(--accent)}
+.chk b{font-size:.84rem;font-weight:600}
+.chk p{font-size:.76rem;color:var(--muted)}
+.appr-grid{display:grid;grid-template-columns:minmax(0,1.4fr) minmax(0,1fr);gap:18px}
+.actions{display:flex;gap:8px;flex-wrap:wrap}
+.track{display:grid;gap:0}
+.tstep{display:grid;grid-template-columns:20px minmax(0,1fr) auto;gap:10px;padding-bottom:12px;position:relative}
+.tstep::before{content:"";position:absolute;left:9px;top:18px;bottom:0;width:2px;background:var(--line)}
+.tstep:last-child::before{display:none}
+.dot{width:20px;height:20px;border-radius:50%;border:2px solid var(--line-strong);background:var(--surface);z-index:1}
+.tstep.done .dot{background:var(--good);border-color:var(--good)}
+.tstep.live .dot{border-color:var(--accent);box-shadow:0 0 0 4px var(--accent-soft)}
+.tstep .tt{font-size:.82rem}
+.tstep .tt small{display:block;color:var(--muted);font-size:.72rem}
+.tstep.pending{opacity:.5}
+.audit{font-family:var(--f-mono);font-size:.72rem;display:grid;gap:3px;background:var(--sunk);border:1px solid var(--line);border-radius:6px;padding:10px;max-height:190px;overflow:auto}
+
+/* other tabs */
+.page{padding-block:18px 40px;display:grid;gap:16px}
+.cards3{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px}
+.fi{display:grid;grid-template-columns:minmax(0,230px) minmax(0,1fr) 44px;gap:10px;align-items:center;font-size:.8rem;padding-block:3px}
+.fi .bar{height:9px}
+.flow{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:8px;counter-reset:f}
+.flow div{border:1px solid var(--line);border-radius:6px;padding:10px;background:var(--sunk);font-size:.78rem;display:grid;gap:4px;align-content:start}
+.flow div b{font-size:.82rem}
+.flow div::before{counter-increment:f;content:counter(f,decimal-leading-zero);font-family:var(--f-mono);font-size:.66rem;color:var(--accent)}
+.metric{display:grid;gap:2px;padding:10px 0;border-bottom:1px dashed var(--line)}
+.metric:last-child{border-bottom:0}
+.metric .v{font-family:var(--f-display);font-stretch:80%;font-size:1.6rem;font-weight:700;line-height:1}
+.foot{font-size:.74rem;color:var(--muted);padding-block:0 30px}
+
+@media (max-width:1100px){
+  .rc,.rc-head{grid-template-columns:28px minmax(0,1.5fr) repeat(3,minmax(0,1fr))}
+  .rc .score,.rc-head .sc{grid-column:2 / -1}
+  .rc-head .sc{display:none}
+}
+@media (max-width:980px){
+  .layout{grid-template-columns:minmax(0,1fr)}
+  .rail{position:static;max-height:none;overflow:visible}
+  .scen-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .hero,.two,.appr-grid,.cards3{grid-template-columns:minmax(0,1fr)}
+  .hero-l{border-right:0;border-bottom:1px solid var(--line)}
+  .hero-r{border-radius:0 0 var(--r) var(--r)}
+  .flow{grid-template-columns:repeat(2,minmax(0,1fr))}
+}
+@media (max-width:620px){
+  .scen-grid{grid-template-columns:minmax(0,1fr)}
+  .kpis{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .rc{grid-template-columns:24px minmax(0,1fr) minmax(0,1fr)}
+  .rc .rname{grid-column:2 / -1}
+  .rc-head{display:none}
+  .reason{grid-column:1 / -1}
+  .crow{grid-template-columns:110px minmax(0,1fr) 40px}
+  .fi{grid-template-columns:minmax(0,1fr) 44px}
+  .fi .bar{grid-column:1 / -1;grid-row:2}
+  .topmeta{margin-left:0}
+}
+@media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
+</style>
+
+<header class="topbar">
+  <div class="wrap">
+    <div class="brand">
+      <div class="mark" aria-hidden="true"><svg width="18" height="18" viewBox="0 0 18 18"><path d="M2 13 C6 13 6 5 9 5 S12 13 16 13" fill="none" stroke="var(--accent-ink)" stroke-width="2" stroke-linecap="round"/><circle cx="2" cy="13" r="1.8" fill="var(--accent-ink)"/><circle cx="16" cy="13" r="1.8" fill="var(--accent-ink)"/></svg></div>
+      <div><b>CorridorIQ</b><small>Cross-border routing · white-label for your bank</small></div>
+    </div>
+    <nav class="tabs" role="tablist" aria-label="Sections">
+      <button class="tab" role="tab" id="tab-route" aria-selected="true" data-tab="route">Route a payment</button>
+      <button class="tab" role="tab" id="tab-hist" aria-selected="false" data-tab="hist">Historical cases</button>
+      <button class="tab" role="tab" id="tab-model" aria-selected="false" data-tab="model">Model &amp; governance</button>
+    </nav>
+    <div class="topmeta">
+      <span class="pill test">Demo · test data</span>
+      <span class="eyebrow">Sun 4 Oct 2026 · Ordering bank: Lakeshore Community Bank</span>
+    </div>
+  </div>
+</header>
+
+<!-- ============ ROUTE TAB ============ -->
+<section id="view-route" class="wrap">
+  <div class="scen">
+    <div class="scen-head"><span class="eyebrow">Demo scenarios</span><span class="muted" style="font-size:.8rem">Pick one to load a client request, or write your own in step 1.</span></div>
+    <div class="scen-grid" id="scenGrid"></div>
+  </div>
+
+  <div class="layout">
+    <!-- LEFT RAIL -->
+    <aside class="rail">
+      <div class="panel">
+        <div class="panel-h"><div class="ph"><span class="step">1</span><h3>Payment requirement</h3></div></div>
+        <div class="panel-b" style="display:grid;gap:12px">
+          <div class="field">
+            <label for="req">Describe the payment in your own words</label>
+            <textarea id="req" class="input" spellcheck="false"></textarea>
+          </div>
+          <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+            <button class="btn primary" id="btnInterpret">Interpret request</button>
+            <span class="muted" style="font-size:.74rem">Fills the fields below; you can edit any of them.</span>
+          </div>
+          <div class="chips" id="parsed"></div>
+
+          <div class="field"><span class="lbl">Client type</span>
+            <div class="seg" id="segCust"><button data-v="Retail" aria-pressed="true">Retail &amp; business</button><button data-v="FI" aria-pressed="false">Financial institution</button></div>
+          </div>
+          <div class="row2">
+            <div class="field"><label for="from">From</label><select id="from" class="input" disabled><option>United States · USD</option></select></div>
+            <div class="field"><label for="dest">To</label>
+              <select id="dest" class="input">
+                <option value="JP">Japan · JPY</option><option value="IN">India · INR</option><option value="AE">UAE · AED</option><option value="SA">Saudi Arabia · SAR</option><option value="DE">Germany · EUR</option>
+              </select></div>
+          </div>
+          <div class="row2">
+            <div class="field"><label for="amount">Amount (USD)</label><input id="amount" class="input mono" type="number" min="1" step="1"></div>
+            <div class="field"><label for="charges">Charges</label>
+              <select id="charges" class="input"><option value="OUR">OUR · sender pays all</option><option value="SHA">SHA · shared</option><option value="BEN">BEN · beneficiary pays</option></select></div>
+          </div>
+          <div class="row2">
+            <div class="field"><label for="vd">Value date</label><input id="vd" class="input mono" type="date" min="2026-10-05"></div>
+            <div class="field"><label for="deadline">Must arrive by <span style="font-weight:400">(optional)</span></label><input id="deadline" class="input mono" type="date"></div>
+          </div>
+          <div class="row2">
+            <div class="field"><label for="bene">Beneficiary</label><input id="bene" class="input"></div>
+            <div class="field"><label for="purpose">Purpose code</label>
+              <select id="purpose" class="input"><option value="EDUC">EDUC · Education</option><option value="OTHR">OTHR · Family support</option><option value="SUPP">SUPP · Supplier payment</option><option value="INTC">INTC · Intra-company</option><option value="SALA">SALA · Salary</option></select></div>
+          </div>
+          <div class="slider">
+            <label class="lbl" for="prio">Priority · <span id="prioTxt"></span></label>
+            <input id="prio" type="range" min="0" max="100" step="5">
+            <div class="ends"><span>Lowest cost</span><span>Fastest credit</span></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-h"><div class="ph"><span class="step">2</span><h3>Correspondent preferences</h3></div></div>
+        <div class="panel-b" style="display:grid;gap:10px">
+          <label class="toggle"><input type="checkbox" id="avoid"><span><b>Avoid correspondents closed near the value date.</b> <span class="muted">Excludes banks with a weekend or holiday on the value date or the day after while US markets are open, such as Gulf banks on a Friday.</span></span></label>
+          <div class="corr" id="corrList"></div>
+          <p class="muted" style="font-size:.72rem">Untick to exclude a bank. The star marks a preferred relationship, which the model favours slightly.</p>
+        </div>
+      </div>
+      <button class="btn primary" id="btnRun" style="padding:10px">Find best corridors</button>
+    </aside>
+
+    <!-- MAIN -->
+    <div class="main" id="main">
+      <div class="panel" id="summary"></div>
+      <div class="panel">
+        <div class="panel-h">
+          <div class="ph"><span class="step">3</span><h3>Ranked corridors</h3></div>
+          <span class="muted" style="font-size:.76rem" id="rankMeta"></span>
+        </div>
+        <div class="panel-b" style="display:grid;gap:8px">
+          <div class="rc-head"><span>#</span><span>Corridor</span><span>Credit (P50)</span><span>All-in cost</span><span>Rate offered</span><span class="sc">Model score</span></div>
+          <div class="routes" id="routes"></div>
+        </div>
+      </div>
+
+      <div class="two">
+        <div class="panel">
+          <div class="panel-h"><h3>Cost vs time trade-off</h3><span class="muted" style="font-size:.74rem">Click a point to inspect</span></div>
+          <div class="panel-b chart-wrap" id="pareto"></div>
+        </div>
+        <div class="panel">
+          <div class="panel-h"><h3>Banking calendar</h3><span class="muted" style="font-size:.74rem" id="calMeta"></span></div>
+          <div class="panel-b"><div class="cal" id="cal"></div>
+            <div class="legend"><span><i style="background:var(--sunk)"></i>Business day</span><span><i style="background:repeating-linear-gradient(135deg,var(--hatch) 0 3px,transparent 3px 6px)"></i>Weekend</span><span><i style="background:var(--warn-soft)"></i>Holiday</span><span><i style="box-shadow:inset 0 0 0 2px var(--accent)"></i>Value date</span><span><i style="background:var(--good);border-radius:50%"></i>Credit (selected)</span></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="panel" id="detail"></div>
+      <div class="panel" id="similar"></div>
+      <div class="panel" id="approval"></div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ HISTORY TAB ============ -->
+<section id="view-hist" class="wrap" hidden>
+  <div class="page">
+    <div style="display:flex;gap:14px;align-items:end;flex-wrap:wrap;justify-content:space-between">
+      <div style="display:grid;gap:4px"><span class="eyebrow">Historical cases</span><h2>What actually happened on each corridor</h2><p class="muted" style="max-width:68ch">Settled payments feed the model. Each row records where the payment went, how long it took, what it cost, and any delay the operations team annotated.</p></div>
+      <div class="field" style="min-width:200px"><label for="histDest">Corridor</label>
+        <select id="histDest" class="input"><option value="JP">USD → JPY · Japan</option><option value="IN">USD → INR · India</option><option value="AE">USD → AED · UAE</option><option value="SA">USD → SAR · Saudi Arabia</option><option value="DE">USD → EUR · Germany</option></select></div>
+    </div>
+    <div class="two">
+      <div class="panel"><div class="panel-h"><h3>Route performance, last 18 months</h3></div><div class="panel-b tscroll" id="histStats"></div></div>
+      <div class="panel"><div class="panel-h"><h3 id="fxTitle">FX rate, last 90 days</h3><span class="muted" style="font-size:.74rem">Indicative test rates</span></div><div class="panel-b chart-wrap" id="fxChart"></div></div>
+    </div>
+    <div class="panel"><div class="panel-h"><h3>Annotated incidents</h3><span class="muted" style="font-size:.74rem">Cases ops flagged for the model to learn from</span></div><div class="panel-b tscroll" id="histInc"></div></div>
+    <div class="panel"><div class="panel-h"><h3>All cases</h3><span class="muted" style="font-size:.74rem" id="histCount"></span></div><div class="panel-b tscroll" id="histAll"></div></div>
+  </div>
+</section>
+
+<!-- ============ MODEL TAB ============ -->
+<section id="view-model" class="wrap" hidden>
+  <div class="page">
+    <div style="display:grid;gap:4px"><span class="eyebrow">Model &amp; governance</span><h2>How the recommendation is made, and who signs it off</h2><p class="muted" style="max-width:72ch">A LightGBM ranking model scores every feasible corridor. Two companion LightGBM regressors predict time to credit and all-in cost. Hard rules for compliance, caps and calendars run before ranking, and a person certifies every payment before release.</p></div>
+    <div class="panel"><div class="panel-h"><h3>Decision pipeline</h3></div><div class="panel-b">
+      <div class="flow">
+        <div><b>Ingest</b><span class="muted">SWIFT gpi tracker events, pacs.008 / MT103 history, FX feed, holiday calendars, nostro balances, sanctions lists</span></div>
+        <div><b>Feature store</b><span class="muted">Hop count, cut-off proximity, calendar exposure per bank, amount band, FX tier, STP history</span></div>
+        <div><b>Rules gate</b><span class="muted">Caps, client eligibility, excluded banks, calendar conflicts, screening alerts</span></div>
+        <div><b>LightGBM ranker</b><span class="muted">LambdaRank objective, weighted by the client's cost-versus-speed priority</span></div>
+        <div><b>Human certification</b><span class="muted">Checker verifies screening, disclosures and route; overrides need a reason</span></div>
+        <div><b>Release &amp; learn</b><span class="muted">gpi tracking; actual time and cost return to training weekly</span></div>
+      </div>
+    </div></div>
+    <div class="cards3">
+      <div class="panel"><div class="panel-h"><h3>Model card</h3></div><div class="panel-b">
+        <div class="kv"><span>Ranker</span><span>LightGBM 4.5 · lambdarank</span></div>
+        <div class="kv"><span>Version</span><span>corridor-rank v3.4.1</span></div>
+        <div class="kv"><span>Training window</span><span>Apr 2024 – Sep 2026</span></div>
+        <div class="kv"><span>Training rows</span><span>2.41M payments</span></div>
+        <div class="kv"><span>Trees / leaves</span><span>1,200 / 63</span></div>
+        <div class="kv"><span>Learning rate</span><span>0.03</span></div>
+        <div class="kv"><span>Retrain cadence</span><span>Weekly, Sunday 02:00 ET</span></div>
+        <div class="kv"><span>Last retrain</span><span>27 Sep 2026</span></div>
+        <div class="kv"><span>Explainability</span><span>TreeSHAP per route</span></div>
+      </div></div>
+      <div class="panel"><div class="panel-h"><h3>Holdout performance</h3></div><div class="panel-b">
+        <div class="metric"><span class="v">0.912</span><span class="muted">NDCG@3 against the route that actually performed best</span></div>
+        <div class="metric"><span class="v">2.3 h</span><span class="muted">Mean absolute error, time to credit (corridors under 72 h)</span></div>
+        <div class="metric"><span class="v">4.1%</span><span class="muted">Mean absolute percentage error, all-in cost</span></div>
+        <div class="metric"><span class="v">91.4%</span><span class="muted">Checker agreed with the top-ranked route</span></div>
+      </div></div>
+      <div class="panel"><div class="panel-h"><h3>Human-in-the-loop policy</h3></div><div class="panel-b" style="display:grid;gap:8px;font-size:.82rem">
+        <p>Every payment needs a checker. The model prepares; it never releases.</p>
+        <div class="kv"><span>Up to $1M</span><span>1 checker</span></div>
+        <div class="kv"><span>Above $1M</span><span>2 checkers</span></div>
+        <div class="kv"><span>Screening alert</span><span>+ L2 Compliance</span></div>
+        <div class="kv"><span>Override of rank 1</span><span>Written reason</span></div>
+        <div class="kv"><span>Override rate, Sep 2026</span><span>8.6%</span></div>
+        <p class="muted" style="font-size:.76rem">Overrides and their reasons are labelled and returned to training, so repeated overrides change future rankings.</p>
+      </div></div>
+    </div>
+    <div class="two">
+      <div class="panel"><div class="panel-h"><h3>Global feature importance</h3><span class="muted" style="font-size:.74rem">Share of total gain</span></div><div class="panel-b" id="fiList"></div></div>
+      <div class="panel"><div class="panel-h"><h3>Monitoring</h3></div><div class="panel-b">
+        <table class="data"><thead><tr><th>Signal</th><th class="r">Value</th><th>Status</th></tr></thead><tbody>
+          <tr><td>Feature drift (PSI), amount band</td><td class="r num">0.04</td><td><span class="pill good">Stable</span></td></tr>
+          <tr><td>Feature drift (PSI), FX volatility</td><td class="r num">0.13</td><td><span class="pill warn">Watch</span></td></tr>
+          <tr><td>Predicted vs actual credit time, 7 days</td><td class="r num">+0.6 h</td><td><span class="pill good">Within band</span></td></tr>
+          <tr><td>Calendar feed freshness</td><td class="r num">2 h</td><td><span class="pill good">Current</span></td></tr>
+          <tr><td>Sanctions list version</td><td class="r num">2026-10-03</td><td><span class="pill good">Current</span></td></tr>
+          <tr><td>Challenger model (v3.5-rc)</td><td class="r num">NDCG 0.918</td><td><span class="pill info">Shadow</span></td></tr>
+        </tbody></table>
+      </div></div>
+    </div>
+  </div>
+</section>
+
+<div class="wrap foot">All banks, BICs, fees, FX rates, holidays and cases on this page are illustrative test data for demonstration. The ranking runs in your browser as a stand-in for the production LightGBM service.</div>
+
+<script>
+/* ===================== reference data ===================== */
+const TODAY_KEY='2026-10-04';
+const TZ={US:-4,JP:9,SG:8,GB:1,BH:3,IN:5.5,AE:4,SA:3,DE:2};
+const TZL={US:'ET',JP:'JST',SG:'SGT',GB:'BST',BH:'AST',IN:'IST',AE:'GST',SA:'AST',DE:'CEST'};
+const CNAME={US:'United States',JP:'Japan',SG:'Singapore',GB:'United Kingdom',BH:'Bahrain',IN:'India',AE:'UAE',SA:'Saudi Arabia',DE:'Germany'};
+const WEEKEND={US:[0,6],JP:[0,6],SG:[0,6],GB:[0,6],BH:[5,6],IN:[0],AE:[0,6],SA:[5,6],DE:[0,6]};
+const HOL={
+  US:{'2025-10-13':'Columbus Day · Fedwire closed','2025-11-11':'Veterans Day','2025-11-27':'Thanksgiving','2025-12-25':'Christmas','2026-01-01':"New Year's Day",'2026-01-19':'MLK Day','2026-02-16':"Presidents' Day",'2026-05-25':'Memorial Day','2026-06-19':'Juneteenth','2026-07-03':'Independence Day (obs.)','2026-09-07':'Labor Day','2026-10-12':'Columbus Day · Fedwire closed','2026-11-11':'Veterans Day','2026-11-26':'Thanksgiving'},
+  JP:{'2025-10-13':'Sports Day','2025-11-03':'Culture Day','2025-11-24':'Labour Thanksgiving (obs.)','2026-01-01':'New Year','2026-01-02':'Bank holiday','2026-01-12':'Coming of Age Day','2026-02-11':'Foundation Day','2026-02-23':"Emperor's Birthday",'2026-03-20':'Vernal Equinox','2026-04-29':'Showa Day','2026-05-04':'Greenery Day','2026-05-05':"Children's Day",'2026-05-06':'Constitution Day (obs.)','2026-07-20':'Marine Day','2026-08-11':'Mountain Day','2026-09-21':'Respect for the Aged Day','2026-09-22':'National holiday','2026-09-23':'Autumnal Equinox','2026-10-12':'Sports Day','2026-11-03':'Culture Day','2026-11-23':'Labour Thanksgiving Day'},
+  SG:{'2026-11-09':'Deepavali (obs.)'},
+  GB:{'2025-12-25':'Christmas','2026-08-31':'Summer bank holiday'},
+  BH:{},
+  IN:{'2026-10-02':'Gandhi Jayanti','2026-10-20':'Dussehra','2026-11-09':'Diwali holiday'},
+  AE:{'2026-12-02':'National Day'},
+  SA:{},
+  DE:{}
+};
+const CRISK={JP:1,IN:2,AE:2,SA:2,DE:1};
+const BANKS={
+  ORIG:{key:'ORIG',name:'Lakeshore Community Bank',city:'Toledo, Ohio',bic:'LKSBUS41',cc:'US',cutoff:16,role:'Ordering bank',risk:1},
+  NY1:{key:'NY1',name:'Hudson Meridian Bank',city:'New York',bic:'HDMBUS33',cc:'US',cutoff:17,role:'USD correspondent',risk:1,inter:true},
+  NY2:{key:'NY2',name:'Atlantic Union Clearing',city:'New York',bic:'AUCLUS3N',cc:'US',cutoff:18,role:'USD correspondent',risk:1,inter:true},
+  SG:{key:'SG',name:'Lion City Commerce Bank',city:'Singapore',bic:'LCCBSGSG',cc:'SG',cutoff:15,role:'Asia hub',risk:1,inter:true},
+  LN:{key:'LN',name:'Thames Commerce Bank',city:'London',bic:'THCBGB2L',cc:'GB',cutoff:16,role:'Europe hub',risk:1,inter:true},
+  BH:{key:'BH',name:'Gulf Crescent Bank',city:'Manama',bic:'GCBKBHBM',cc:'BH',cutoff:13,role:'Gulf hub',risk:2,inter:true},
+  PAY:{key:'PAY',name:'Kite Payout Network',city:'Licensed MSB · San Francisco',bic:'API',cc:'US',allDay:true,role:'Payout partner',risk:2,inter:true,nonbank:true}
+};
+const DEST={
+  JP:{cc:'JP',ccy:'JPY',rate:147.85,dp:0,clr:{name:'Nihon Trust Bank',city:'Tokyo',bic:'NHTBJPJT',cc:'JP',cutoff:15,role:'JPY clearing bank',risk:1},bene:{name:'Shirakawa Shinkin Bank',city:'Kyoto',bic:'SHKWJPJK',cc:'JP',cutoff:15,role:'Beneficiary bank',risk:1},local:'Zengin',tpls:['EXP','ASIA','LDN','GULF','PAY','ECO']},
+  IN:{cc:'IN',ccy:'INR',rate:88.40,dp:2,clr:{name:'Deccan National Bank',city:'Mumbai',bic:'DNBKINBB',cc:'IN',cutoff:15,role:'INR clearing bank',risk:2},bene:{name:'Konkan Cooperative Bank',city:'Ratnagiri',bic:'KNKCINBB',cc:'IN',cutoff:15,role:'Beneficiary bank',risk:2},local:'NEFT / IMPS',tpls:['EXP','ASIA','LDN','GULF','PAY','ECO']},
+  AE:{cc:'AE',ccy:'AED',rate:3.6725,dp:2,clr:{name:'Emirates Pearl Bank',city:'Dubai',bic:'EPBKAEAD',cc:'AE',cutoff:14,role:'AED clearing bank',risk:2},bene:{name:'Sharjah Coastal Bank',city:'Sharjah',bic:'SHCBAEAS',cc:'AE',cutoff:14,role:'Beneficiary bank',risk:2},local:'UAEFTS',tpls:['EXP','LDN','GULF','PAY']},
+  SA:{cc:'SA',ccy:'SAR',rate:3.75,dp:2,clr:{name:'Najd Commercial Bank',city:'Riyadh',bic:'NJCBSARI',cc:'SA',cutoff:14,role:'SAR clearing bank',risk:2},bene:{name:'Asir Regional Bank',city:'Abha',bic:'ASRBSAJE',cc:'SA',cutoff:14,role:'Beneficiary bank',risk:2},local:'SARIE',tpls:['EXP','LDN','GULF']},
+  DE:{cc:'DE',ccy:'EUR',rate:0.8560,dp:2,clr:{name:'Rheinland Handelsbank',city:'Frankfurt',bic:'RHHBDEFF',cc:'DE',cutoff:16,role:'EUR clearing bank',risk:1},bene:{name:'Bodensee Privatbank',city:'Konstanz',bic:'BDPBDE6K',cc:'DE',cutoff:16,role:'Beneficiary bank',risk:1},local:'SEPA Instant',tpls:['EXP','LDN','PAY']}
+};
+const TPL={
+  EXP:{key:'EXP',name:'Express gpi',via:'New York direct',hops:['ORIG','NY1','CLR','BENE'],fees:[30,18,12,0],fx:38,fxL:15,proc:[0.5,1.5,2,1.5],stp:.972,gpi:true,note:'Fewest hops. Hudson Meridian holds a direct nostro with the local clearing bank.'},
+  ASIA:{key:'ASIA',name:'Asia hub',via:'Singapore',hops:['ORIG','NY2','SG','CLR','BENE'],fees:[22,10,8,10,0],fx:22,fxL:9,proc:[1,2.5,4,3,2],stp:.948,gpi:true,note:'Lion City converts at Asia-session prices with deep JPY and INR liquidity.'},
+  LDN:{key:'LDN',name:'Europe hub',via:'London',hops:['ORIG','NY1','LN','CLR','BENE'],fees:[22,14,12,10,0],fx:27,fxL:11,proc:[1,2,3,3,2],stp:.955,gpi:true,note:'Thames Commerce prices off the London session, with strong EUR and AED books.'},
+  GULF:{key:'GULF',name:'Gulf hub',via:'Manama',hops:['ORIG','NY2','BH','CLR','BENE'],fees:[20,10,6,10,0],fx:16,fxL:6,proc:[1,2.5,5,4,2],stp:.931,gpi:true,note:'Tightest FX for large tickets. Gulf Crescent works a Friday–Saturday weekend.'},
+  PAY:{key:'PAY',name:'Payout partner',via:'prefunded local account',hops:['ORIG','PAY','BENE'],fees:[5,0,0],fx:50,fxL:50,proc:[0.3,0.7,0.5],stp:.986,cap:5000,retailOnly:true,nonbank:true,instant:true,note:'The partner pays out from a prefunded local account on the domestic instant rail. Retail only, capped per transfer.'},
+  ECO:{key:'ECO',name:'Economy batch',via:'weekly netting · Singapore',hops:['ORIG','NY2','SG','CLR','BENE'],fees:[2,1,0,1,0],fx:10,fxL:10,proc:[1,2,72,8,4],stp:.962,cap:25000,batch:2,note:"Netted with other flows in Thursday's batch run. Lowest cost, slowest credit."}
+};
+const WATCH=['Crescent Horizon Trading LLC','Volga Maritime Holdings','Nordwind Logistics GmbH'];
+const APPROVERS=['R. Mehta · Payments Operations','L. Ortega · Payments Operations','K. Brooks · Treasury Operations'];
+
+const SCEN=[
+  {k:'Retail · urgent',t:'School fees to Japan',s:'$10,000 today, speed over cost',
+   text:'I want to send $10,000 to my son in Japan for his school fees. It is urgent, the fees are due Wednesday. Please show me the best possible way.',
+   bene:'Kenji Morita',over:{charges:'OUR'}},
+  {k:'Retail · no rush',t:'Small transfer, slow is fine',s:'$800, 1 to 2 weeks is acceptable',
+   text:'I want to send $800 to my son in Japan. No rush, I am happy for it to take 1 to 2 weeks if it is cheaper.',
+   bene:'Kenji Morita',over:{charges:'OUR'}},
+  {k:'Financial institution',t:'Large ticket, value date Thursday',s:'USD 1.2M, Friday is a Gulf weekend',
+   text:'On behalf of our corporate client, we need to send USD 1,200,000 to a supplier in Japan with value date Thursday. Balance cost and speed.',
+   bene:'Hokuriku Precision Components KK',over:{charges:'SHA'}},
+  {k:'Compliance review',t:'Invoice payment with screening alert',s:'$48,000 to UAE, name match',
+   text:'Pay invoice INV-2291 of $48,000 to Crescent Horizon Trading FZE in Dubai, UAE. Normal priority.',
+   bene:'Crescent Horizon Trading FZE',over:{charges:'SHA'},missingAddr:true}
+];
+
+/* ===================== state ===================== */
+const S={scen:0,text:'',cust:'Retail',dest:'JP',amount:10000,charges:'OUR',vd:'2026-10-05',deadline:'',bene:'',purpose:'EDUC',priority:50,
+  avoid:true,excluded:new Set(),preferred:new Set(['NY1']),missingAddr:false,selected:null,res:null,parsed:[],
+  released:false,uetr:null,log:[]};
+
+/* ===================== helpers ===================== */
+const $=s=>document.querySelector(s);
+const esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const DOW=['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+const MON=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+function usd(n,dp){return new Intl.NumberFormat('en-US',{style:'currency',currency:'USD',maximumFractionDigits:dp??2,minimumFractionDigits:dp??2}).format(n)}
+function usd0(n){return usd(n,0)}
+function money(n,ccy,dp){return new Intl.NumberFormat('en-US',{style:'currency',currency:ccy,maximumFractionDigits:dp,minimumFractionDigits:dp}).format(n)}
+function keyOf(L){return L.toISOString().slice(0,10)}
+function lp(t,tz){return new Date(t+tz*36e5)}
+function parseKey(k){const [y,m,d]=k.split('-').map(Number);return new Date(Date.UTC(y,m-1,d))}
+function addDays(k,n){const d=parseKey(k);d.setUTCDate(d.getUTCDate()+n);return keyOf(d)}
+function dayLabel(k){const d=parseKey(k);return `${DOW[d.getUTCDay()]} ${d.getUTCDate()} ${MON[d.getUTCMonth()]}`}
+function fmtT(t,cc){const L=lp(t,TZ[cc]);return `${DOW[L.getUTCDay()]} ${L.getUTCDate()} ${MON[L.getUTCMonth()]}, ${String(L.getUTCHours()).padStart(2,'0')}:${String(L.getUTCMinutes()).padStart(2,'0')} ${TZL[cc]}`}
+function fmtH(h){return h<48?`${h.toFixed(1)} h`:`${(h/24).toFixed(1)} days`}
+function nonBusiness(cc,k,dow,dom){
+  if(HOL[cc]&&HOL[cc][k])return HOL[cc][k];
+  if(WEEKEND[cc].includes(dow)){
+    if(cc==='BH'||cc==='SA')return (dow===5?'Friday':'Saturday')+' · Gulf weekend';
+    return dow===0?'Sunday':'Saturday';
+  }
+  if(cc==='IN'&&dow===6){const n=Math.ceil(dom/7);if(n===2||n===4)return (n===2?'2nd':'4th')+' Saturday · Indian bank holiday'}
+  return null;
+}
+function nbKey(cc,k){const d=parseKey(k);return nonBusiness(cc,k,d.getUTCDay(),d.getUTCDate())}
+function startTime(vd){const d=parseKey(vd);return d.getTime()+14*36e5} // 10:00 ET release
+function mulberry(a){return function(){a|=0;a=a+0x6D2B79F5|0;let t=Math.imul(a^a>>>15,1|a);t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296}}
+function nextDow(fromKey,dow){const d=parseKey(fromKey);let add=(dow-d.getUTCDay()+7)%7;if(add===0)add=7;return addDays(fromKey,add)}
+
+/* ===================== simulation ===================== */
+function hopsFor(tpl,d){return tpl.hops.map(h=>h==='CLR'?{...d.clr,key:'CLR'}:h==='BENE'?{...d.bene,key:'BENE'}:BANKS[h])}
+function simulate(hops,tpl,t0){
+  let t=t0,cal=0;const steps=[];
+  hops.forEach((b,i)=>{
+    const tz=TZ[b.cc],arrive=t,delays=[];
+    const allDay=b.allDay||(tpl.instant&&b.key==='BENE');
+    if(!allDay){
+      for(let g=0;g<40;g++){
+        const L=lp(t,tz),k=keyOf(L),dow=L.getUTCDay(),hr=L.getUTCHours()+L.getUTCMinutes()/60;
+        const y=L.getUTCFullYear(),m=L.getUTCMonth(),dd=L.getUTCDate();
+        const nb=nonBusiness(b.cc,k,dow,dd);
+        if(nb){delays.push({date:k,reason:nb,kind:'cal'});cal++;t=Date.UTC(y,m,dd+1,9)-tz*36e5;continue}
+        if(hr>=b.cutoff){delays.push({date:k,reason:`after ${b.cutoff}:00 cut-off`,kind:'cut'});t=Date.UTC(y,m,dd+1,9)-tz*36e5;continue}
+        if(hr<9){t=Date.UTC(y,m,dd,9)-tz*36e5;continue}
+        break;
+      }
+    }
+    if(tpl.batch===i){
+      const L=lp(t,tz),hr=L.getUTCHours();let add=(4-L.getUTCDay()+7)%7;if(add===0&&hr>=16)add=7;
+      const bt=Date.UTC(L.getUTCFullYear(),L.getUTCMonth(),L.getUTCDate()+add,16)-tz*36e5;
+      if(bt>t)delays.push({date:keyOf(lp(bt,tz)),reason:'held for Thursday netting batch',kind:'batch'});
+      t=Math.max(t,bt);
+    }
+    const start=t;t+=tpl.proc[i]*36e5;
+    steps.push({bank:b,arrive,start,leave:t,delays});
+  });
+  return {steps,arrive:t,hours:(t-t0)/36e5,cal};
+}
+function calConflicts(hops,vd){
+  const out=[];
+  hops.filter(h=>h.inter&&!h.allDay).forEach(h=>{
+    [0,1].forEach(o=>{const k=addDays(vd,o);const us=nbKey('US',k),loc=nbKey(h.cc,k);
+      if(!us&&loc&&!out.find(x=>x.bank===h.key&&x.date===k))out.push({bank:h.key,date:k,text:`${h.name}, ${h.city}, is closed ${dayLabel(k)} (${loc}) while US markets are open`})});
+  });
+  return out;
+}
+function screen(name){
+  const tok=s=>s.toLowerCase().replace(/[^a-z ]/g,' ').split(/\s+/).filter(w=>w&&!['llc','fze','ltd','gmbh','co','kk','inc','the'].includes(w));
+  let best=null;const a=new Set(tok(name||''));if(!a.size)return null;
+  WATCH.forEach(w=>{const b=tok(w);const inter=b.filter(x=>a.has(x)).length;let sc=Math.round(100*2*inter/(a.size+b.length));
+    if(sc>0&&w.toLowerCase()!==String(name).toLowerCase())sc-=12;
+    if(sc>=60&&(!best||sc>best.score))best={entry:w,score:sc}});
+  return best;
+}
+function evaluate(){
+  const d=DEST[S.dest],t0=startTime(S.vd),alert=screen(S.bene);
+  const dl=S.deadline?parseKey(S.deadline).getTime()+24*36e5-TZ[d.cc]*36e5:null; // end of deadline day, local
+  const routes=d.tpls.map(k=>{
+    const tpl=TPL[k],hops=hopsFor(tpl,d),fees=tpl.fees.slice();
+    if(S.cust==='FI')fees[0]=Math.min(fees[0],15);
+    const feeTotal=fees.reduce((a,b)=>a+b,0),bps=S.amount>=250000?tpl.fxL:tpl.fx;
+    const fxCost=S.amount*bps/1e4,cost=feeTotal+fxCost,rate=d.rate*(1-bps/1e4);
+    const net=S.charges==='OUR'?S.amount:S.charges==='SHA'?S.amount-(feeTotal-fees[0]):S.amount-feeTotal;
+    const pays=S.charges==='OUR'?S.amount+feeTotal:S.charges==='SHA'?S.amount+fees[0]:S.amount;
+    const sim=simulate(hops,tpl,t0);
+    const h90=sim.hours*(1.18+(1-tpl.stp)*4)+(sim.cal?4:0);
+    const risk=Math.max(...hops.map(h=>h.risk||1),CRISK[S.dest]);
+    const reasons=[],warns=[];
+    if(tpl.cap&&S.amount>tpl.cap)reasons.push(`Above the ${usd0(tpl.cap)} per-transfer cap`);
+    if(tpl.retailOnly&&S.cust==='FI')reasons.push('Available to retail clients only');
+    hops.filter(h=>h.inter&&S.excluded.has(h.key)).forEach(h=>reasons.push(`You excluded ${h.name}`));
+    if(alert&&tpl.nonbank)reasons.push('A non-bank partner cannot carry a payment with an open screening alert');
+    const conflicts=calConflicts(hops,S.vd);
+    if(conflicts.length){if(S.avoid)conflicts.forEach(c=>reasons.push(c.text));else warns.push({t:'Correspondent closed near value date',c:'warn'})}
+    let missP50=false,missP90=false;
+    if(dl){if(sim.arrive>dl){missP50=true;warns.push({t:'Misses deadline',c:'bad'})}else if(t0+h90*36e5>dl){missP90=true;warns.push({t:'P90 after deadline',c:'warn'})}}
+    const calD=sim.steps.flatMap(s=>s.delays.filter(x=>x.kind==='cal').map(x=>({...x,bank:s.bank})));
+    if(calD.length)warns.push({t:`${new Set(calD.map(x=>x.date)).size} non-business day${new Set(calD.map(x=>x.date)).size>1?'s':''} en route`,c:'warn'});
+    return {key:k,tpl,hops,fees,feeTotal,bps,fxCost,cost,rate,net,bene:net*rate,pays,sim,h90,risk,reasons,warns,missP50,missP90,conflicts,calD};
+  });
+  const el=routes.filter(r=>!r.reasons.length);
+  if(el.length){
+    const lc=r=>Math.log(r.cost),lh=r=>Math.log(Math.max(r.sim.hours,.5));
+    const minC=Math.min(...el.map(lc)),maxC=Math.max(...el.map(lc)),minH=Math.min(...el.map(lh)),maxH=Math.max(...el.map(lh));
+    const wt=S.priority/100,wc=1-wt;
+    el.forEach(r=>{
+      const cN=maxC>minC?(lc(r)-minC)/(maxC-minC):0,tN=maxH>minH?(lh(r)-minH)/(maxH-minH):0;
+      const c={cost:wc*(1-cN)*.55,time:wt*(1-tN)*.55,rel:.14*Math.max(0,Math.min(1,(r.tpl.stp-.9)/.1)),cal:-.04*r.sim.cal*wt,aml:-.05*(r.risk-1),dl:r.missP50?-.45:r.missP90?-.15:0,pref:r.hops.some(h=>S.preferred.has(h.key))?.04:0};
+      r.contrib=c;r.score=Math.max(1,Math.min(99,Math.round((.18+Object.values(c).reduce((a,b)=>a+b,0))*100)));
+    });
+    el.sort((a,b)=>b.score-a.score);
+  }
+  const off=routes.filter(r=>r.reasons.length).sort((a,b)=>a.cost-b.cost);
+  return {routes:[...el,...off],el,off,t0,alert,dl,d};
+}
+
+/* ===================== request interpretation ===================== */
+function interpret(text){
+  const t=text.toLowerCase(),out={},chips=[];
+  const m=t.match(/(?:usd|us\$|\$)\s?([\d,]+(?:\.\d+)?)\s?(k|m|million)?|([\d,]+(?:\.\d+)?)\s?(k|m|million)?\s?(?:usd|dollars|\$)/);
+  if(m){let v=parseFloat((m[1]||m[3]).replace(/,/g,''));const u=m[2]||m[4];if(u==='k')v*=1e3;if(u==='m'||u==='million')v*=1e6;out.amount=Math.round(v);chips.push(['Amount',usd0(out.amount)])}
+  const dm=[['JP',/japan|tokyo|kyoto|osaka|yen|jpy/],['IN',/india|mumbai|delhi|pune|rupee|inr/],['AE',/uae|dubai|emirates|abu dhabi|sharjah|aed/],['SA',/saudi|riyadh|jeddah|sar\b/],['DE',/germany|berlin|frankfurt|munich|euro|eur\b/]];
+  for(const [cc,re] of dm){if(re.test(t)){out.dest=cc;chips.push(['To',`${CNAME[cc]} · ${DEST[cc].ccy}`]);break}}
+  if(/on behalf of|our corporate|correspondent|treasury|\bfi\b|our client/.test(t)){out.cust='FI'}else out.cust='Retail';
+  chips.push(['Client',out.cust==='FI'?'Financial institution':'Retail']);
+  if(/urgent|asap|immediately|today|as fast|quickly|express/.test(t)){out.priority=90;chips.push(['Urgency','High · speed weighted 90%'])}
+  else if(/no rush|not urgent|slow|week|cheap|lowest cost/.test(t)){out.priority=10;chips.push(['Urgency','Low · cost weighted 90%'])}
+  else if(/balance/.test(t)){out.priority=50;chips.push(['Urgency','Balanced'])}
+  else {out.priority=60;chips.push(['Urgency','Normal'])}
+  if(/school|tuition|university|college|education/.test(t)){out.purpose='EDUC'}else if(/invoice|supplier|vendor/.test(t)){out.purpose='SUPP'}else if(/salary|payroll/.test(t)){out.purpose='SALA'}else if(/son|daughter|family|mother|father|parents/.test(t)){out.purpose='OTHR'}
+  if(out.purpose)chips.push(['Purpose',$('#purpose').querySelector(`option[value="${out.purpose}"]`).textContent]);
+  const days=['sunday','monday','tuesday','wednesday','thursday','friday','saturday'];
+  out.vd='2026-10-05';
+  const vdm=t.match(/value date (?:on |of )?(sunday|monday|tuesday|wednesday|thursday|friday|saturday)/);
+  if(vdm){out.vd=nextDow(TODAY_KEY,days.indexOf(vdm[1]))}
+  chips.push(['Value date',dayLabel(out.vd)]);
+  out.deadline='';
+  const ddm=t.match(/(?:due|by|before) (?:on |this )?(sunday|monday|tuesday|wednesday|thursday|friday|saturday)/);
+  if(ddm){out.deadline=nextDow(TODAY_KEY,days.indexOf(ddm[1]))}
+  const wk=t.match(/(\d+)\s?(?:to|-)\s?(\d+)\s?weeks?/);
+  if(wk){out.deadline=addDays(out.vd,7*parseInt(wk[2]))}
+  else{const dd=t.match(/within (\d+) (day|week)s?/);if(dd)out.deadline=addDays(out.vd,parseInt(dd[1])*(dd[2]==='week'?7:1))}
+  if(out.deadline)chips.push(['Arrive by',dayLabel(out.deadline)]);
+  return {out,chips};
+}
+
+/* ===================== form sync ===================== */
+function writeForm(){
+  $('#req').value=S.text;$('#dest').value=S.dest;$('#amount').value=S.amount;$('#charges').value=S.charges;$('#vd').value=S.vd;$('#deadline').value=S.deadline;$('#bene').value=S.bene;$('#purpose').value=S.purpose;$('#prio').value=S.priority;$('#avoid').checked=S.avoid;
+  document.querySelectorAll('#segCust button').forEach(b=>b.setAttribute('aria-pressed',b.dataset.v===S.cust));
+  prioText();renderCorr();
+  $('#parsed').innerHTML=S.parsed.map(([k,v])=>`<span class="chip">${esc(k)}: <b>${esc(v)}</b></span>`).join('');
+}
+function readForm(){
+  S.dest=$('#dest').value;S.amount=Math.max(1,Number($('#amount').value)||1);S.charges=$('#charges').value;S.vd=$('#vd').value||'2026-10-05';S.deadline=$('#deadline').value;S.bene=$('#bene').value;S.purpose=$('#purpose').value;S.priority=Number($('#prio').value);S.avoid=$('#avoid').checked;
+}
+function prioText(){const p=Number($('#prio').value);$('#prioTxt').textContent=p<=25?`cost-led (${100-p}% cost)`:p>=75?`speed-led (${p}% speed)`:`balanced (${p}% speed)`}
+function renderCorr(){
+  const keys=['NY1','NY2','SG','LN','BH','PAY'];
+  $('#corrList').innerHTML=keys.map(k=>{const b=BANKS[k];const we=WEEKEND[b.cc].includes(5)?'<span class="pill warn">Fri–Sat weekend</span>':b.nonbank?'<span class="pill plain">Non-bank</span>':'';
+    return `<div class="corr-row"><input type="checkbox" id="inc-${k}" data-k="${k}" ${S.excluded.has(k)?'':'checked'} aria-label="Include ${esc(b.name)}"><label class="nm" for="inc-${k}">${esc(b.name)}<small>${esc(b.city)} · ${esc(b.role)} · ${b.bic}</small></label><span style="display:flex;gap:4px;align-items:center">${we}<button class="star" data-star="${k}" aria-pressed="${S.preferred.has(k)}" aria-label="Preferred relationship: ${esc(b.name)}" title="Preferred relationship">★</button></span></div>`}).join('');
+}
+
+/* ===================== render: route tab ===================== */
+function run(keepSelection){
+  readForm();S.res=evaluate();S.released=false;S.uetr=null;S.log=[];
+  const rec=S.res.el[0];
+  if(!keepSelection||!S.res.el.find(r=>r.key===S.selected))S.selected=rec?rec.key:null;
+  renderAll();
+}
+function sel(){return S.res.routes.find(r=>r.key===S.selected)}
+function renderAll(){renderSummary();renderRoutes();renderPareto();renderCal();renderDetail();renderSimilar();renderApproval()}
+
+function renderSummary(){
+  const R=S.res,rec=R.el[0],d=R.d;
+  if(!rec){$('#summary').innerHTML=`<div class="panel-b"><div class="callout bad"><div class="grow"><b>No corridor meets these requirements.</b> Every route is excluded by a cap, a calendar conflict or your bank selections. Loosen a preference in step 2 to see options.</div></div></div>`;return}
+  const second=R.el[1],gap=second?rec.score-second.score:30;
+  const conf=gap>=15?['High','good']:gap>=6?['Medium','info']:['Close call','warn'];
+  const cheaperOff=R.off.filter(r=>r.cost<rec.cost&&r.conflicts.length).sort((a,b)=>a.cost-b.cost)[0];
+  let alt='';
+  if(cheaperOff){alt=`<div class="callout warn"><div class="grow"><b>Calendar check removed a cheaper route.</b> ${esc(cheaperOff.tpl.name)} via ${esc(cheaperOff.tpl.via)} would save ${usd0(rec.cost-cheaperOff.cost)}, but would credit ${fmtT(cheaperOff.sim.arrive,d.cc)} instead of ${fmtT(rec.sim.arrive,d.cc)}. ${esc(cheaperOff.conflicts[0].text)}.</div><button class="btn sm" id="allowAnyway">Allow anyway</button></div>`}
+  else if(!S.avoid&&rec.conflicts.length){alt=`<div class="callout warn"><div class="grow"><b>Calendar rule is off.</b> ${esc(rec.conflicts[0].text)}.</div><button class="btn sm" id="allowAnyway">Turn rule back on</button></div>`}
+  const amlBox=R.alert?`<div class="callout bad"><div class="grow"><b>Screening alert.</b> “${esc(S.bene)}” resembles “${esc(R.alert.entry)}” on the test watchlist (${R.alert.score}% match). The payment can be routed, but release needs L2 Compliance sign-off. Expected review hold: 4–24 h.</div></div>`:'';
+  $('#summary').innerHTML=`<div class="hero">
+    <div class="hero-l">
+      <span class="eyebrow">Recommended corridor · ${usd0(S.amount)} to ${esc(CNAME[d.cc])}</span>
+      <h2><em>${esc(rec.tpl.name)}</em> via ${esc(rec.tpl.via)}. Credits ${fmtT(rec.sim.arrive,d.cc)}.</h2>
+      <p class="muted" style="font-size:.84rem;max-width:70ch">${esc(whyText(rec,R))}</p>
+      <div class="kpis">
+        <div class="kpi"><span class="v">${fmtH(rec.sim.hours)}</span><span class="l">Time to credit, P50</span></div>
+        <div class="kpi"><span class="v">${usd(rec.cost)}</span><span class="l">All-in cost (fees + FX margin)</span></div>
+        <div class="kpi"><span class="v">${money(rec.bene,d.ccy,d.dp)}</span><span class="l">Beneficiary receives</span></div>
+        <div class="kpi"><span class="v">${rec.hops.length-2} bank${rec.hops.length-2>1?'s':''}</span><span class="l">Intermediaries</span></div>
+      </div>
+      ${alt}${amlBox}
+    </div>
+    <div class="hero-r">
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:8px"><span class="eyebrow">Model output</span><span class="pill ${conf[1]}">Confidence: ${conf[0]}</span></div>
+      <div class="kv"><span>Model score</span><span>${rec.score} / 100</span></div>
+      <div class="kv"><span>Lead over next route</span><span>${second?gap+' pts':'only option'}</span></div>
+      <div class="kv"><span>Corridors evaluated</span><span>${R.routes.length} (${R.off.length} excluded)</span></div>
+      <div class="kv"><span>USD/${d.ccy} mid (test)</span><span>${d.rate.toFixed(d.ccy==='JPY'||d.ccy==='INR'?2:4)}</span></div>
+      <div class="kv"><span>Release time</span><span>${fmtT(R.t0,'US')}</span></div>
+      <div class="kv"><span>You pay</span><span>${usd(rec.pays)}</span></div>
+      <div class="kv"><span>Engine</span><span>corridor-rank v3.4.1</span></div>
+    </div>
+  </div>`;
+  const a=$('#allowAnyway');if(a)a.onclick=()=>{S.avoid=!S.avoid;$('#avoid').checked=S.avoid;run()};
+}
+function whyText(r,R){
+  const others=R.el.filter(x=>x!==r);if(!others.length)return 'This is the only corridor that clears every rule for this payment.';
+  const cheapest=[...R.el].sort((a,b)=>a.cost-b.cost)[0],fastest=[...R.el].sort((a,b)=>a.sim.hours-b.sim.hours)[0];
+  const p=S.priority;let s='';
+  if(r===fastest&&r===cheapest)s='Fastest and cheapest of the eligible routes.';
+  else if(r===fastest)s=`Fastest eligible route. It costs ${usd0(r.cost-cheapest.cost)} more than ${cheapest.tpl.name} but credits ${fmtH(cheapest.sim.hours-r.sim.hours)} sooner, which fits a ${p>=75?'speed-led':'balanced'} brief.`;
+  else if(r===cheapest)s=`Cheapest eligible route, ${usd0(fastest.cost-r.cost)} less than ${fastest.tpl.name}. It takes ${fmtH(r.sim.hours-fastest.sim.hours)} longer${S.deadline?' and still lands before the deadline':''}.`;
+  else s=`Best balance of cost and time for this brief.`;
+  if(r.calD.length)s+=` It crosses ${new Set(r.calD.map(x=>x.date)).size} non-business day(s), already priced into the estimate.`;
+  return s;
+}
+function renderRoutes(){
+  const R=S.res,d=R.d;
+  $('#rankMeta').textContent=`${R.el.length} eligible · ${R.off.length} excluded by rules`;
+  $('#routes').innerHTML=R.routes.map(r=>{
+    const off=r.reasons.length>0,i=R.el.indexOf(r);
+    const badges=[r.tpl.gpi?'<span class="pill info">gpi</span>':'',r.tpl.nonbank?'<span class="pill plain">Non-bank</span>':'',...r.warns.map(w=>`<span class="pill ${w.c}">${esc(w.t)}</span>`),(!off&&i===0)?'<span class="pill good">Recommended</span>':''].join('');
+    return `<button class="rc ${off?'off':''}" ${off?'aria-disabled="true"':''} data-route="${r.key}" aria-pressed="${S.selected===r.key}">
+      <span class="rank">${off?'—':i+1}</span>
+      <span class="rname">${esc(r.tpl.name)}<small>via ${esc(r.tpl.via)} · ${r.hops.length-2} intermediar${r.hops.length-2>1?'ies':'y'}</small></span>
+      <span class="rv">${fmtH(r.sim.hours)}<small>P90 ${fmtH(r.h90)}</small></span>
+      <span class="rv">${usd(r.cost)}<small>${usd0(r.feeTotal)} fees + ${r.bps} bps FX</small></span>
+      <span class="rv">${r.rate.toFixed(d.dp===0?2:4)}<small>${d.ccy} per USD</small></span>
+      <span class="score">${off?'<span class="muted" style="font-size:.76rem">Not ranked</span>':`<span style="display:flex;justify-content:space-between;font-size:.76rem"><span class="muted">Score</span><span class="num">${r.score}</span></span><span class="bar"><i style="width:${r.score}%"></i></span>`}<span class="badges">${badges}</span></span>
+      ${off?`<span class="reason"><span class="muted">Excluded:</span>${r.reasons.map(esc).join(' · ')}</span>`:''}
+    </button>`}).join('');
+}
+function renderPareto(){
+  const R=S.res;const pts=R.routes;const W=520,H=290,ml=58,mr=18,mt=16,mb=40;
+  const hs=pts.map(r=>r.sim.hours),cs=pts.map(r=>r.cost);
+  const hmin=Math.max(.5,Math.min(...hs)*.7),hmax=Math.max(...hs)*1.35;
+  const cmax=Math.max(...cs)*1.15;
+  const x=h=>ml+(Math.log(h)-Math.log(hmin))/(Math.log(hmax)-Math.log(hmin))*(W-ml-mr);
+  const y=c=>mt+(1-c/cmax)*(H-mt-mb);
+  const xt=[1,2,4,8,12,24,48,96,168,336].filter(v=>v>=hmin&&v<=hmax);
+  const step=niceStep(cmax/4);const yt=[];for(let v=0;v<=cmax;v+=step)yt.push(v);
+  const el=[...R.el].sort((a,b)=>a.sim.hours-b.sim.hours);let best=Infinity;const front=[];
+  el.forEach(r=>{if(r.cost<best){front.push(r);best=r.cost}});
+  const path=front.map((r,i)=>`${i?'L':'M'}${x(r.sim.hours).toFixed(1)},${y(r.cost).toFixed(1)}`).join(' ');
+  const rec=R.el[0];
+  let svg=`<svg viewBox="0 0 ${W} ${H}" width="100%" style="min-width:420px;display:block" role="img" aria-label="Scatter of corridors by time to credit and all-in cost">`;
+  yt.forEach(v=>{svg+=`<line x1="${ml}" x2="${W-mr}" y1="${y(v)}" y2="${y(v)}" stroke="var(--line)" stroke-width="1"/><text x="${ml-8}" y="${y(v)+4}" text-anchor="end" font-size="10" fill="var(--muted)">${v>=1000?'$'+(v/1000).toFixed(v%1000?1:0)+'k':'$'+v}</text>`});
+  xt.forEach(v=>{svg+=`<line x1="${x(v)}" x2="${x(v)}" y1="${mt}" y2="${H-mb}" stroke="var(--line)" stroke-dasharray="2 3"/><text x="${x(v)}" y="${H-mb+15}" text-anchor="middle" font-size="10" fill="var(--muted)">${v<48?v+'h':(v/24)+'d'}</text>`});
+  svg+=`<text x="${(ml+W-mr)/2}" y="${H-6}" text-anchor="middle" font-size="10" fill="var(--muted)">Time to credit, P50 (log scale)</text><text x="12" y="${(mt+H-mb)/2}" transform="rotate(-90 12 ${(mt+H-mb)/2})" text-anchor="middle" font-size="10" fill="var(--muted)">All-in cost</text>`;
+  if(front.length>1)svg+=`<path d="${path}" fill="none" stroke="var(--accent)" stroke-width="1.5" stroke-dasharray="4 3" opacity=".7"/>`;
+  pts.forEach(r=>{const off=r.reasons.length>0,cx=x(r.sim.hours),cy=y(r.cost),selr=r.key===S.selected;
+    const lx=cx>W-130?cx-10:cx+10,anchor=cx>W-130?'end':'start';
+    svg+=`<g class="pt" data-route="${off?'':r.key}" style="cursor:${off?'default':'pointer'}">${selr?`<circle cx="${cx}" cy="${cy}" r="11" fill="none" stroke="var(--accent)" stroke-width="2"/>`:''}<circle cx="${cx}" cy="${cy}" r="${r===rec?7:5.5}" fill="${off?'var(--surface)':r===rec?'var(--accent)':'var(--speed)'}" stroke="${off?'var(--faint)':'var(--surface)'}" stroke-width="${off?1.5:1.5}" ${off?'stroke-dasharray="2 2"':''}/><text x="${lx}" y="${cy-8}" text-anchor="${anchor}" font-size="10.5" fill="${off?'var(--faint)':'var(--ink)'}">${esc(r.tpl.name)}${off?' (excluded)':''}</text></g>`});
+  svg+=`</svg><div class="legend"><span><i style="background:var(--accent);border-radius:50%"></i>Recommended</span><span><i style="background:var(--speed);border-radius:50%"></i>Eligible</span><span><i style="border:1px dashed var(--faint);border-radius:50%"></i>Excluded by rules</span><span><i style="border:0;border-top:2px dashed var(--accent);height:0;width:16px;border-radius:0"></i>Best trade-off frontier</span></div>`;
+  $('#pareto').innerHTML=svg;
+}
+function niceStep(v){const p=Math.pow(10,Math.floor(Math.log10(v)));const n=v/p;return (n<=1?1:n<=2?2:n<=5?5:10)*p}
+function renderCal(){
+  const R=S.res,r=sel();const ccs=['US'];
+  R.routes.forEach(x=>x.hops.forEach(h=>{if(!h.allDay&&!ccs.includes(h.cc))ccs.push(h.cc)}));
+  const start=addDays(S.vd,-1),days=[...Array(14)].map((_,i)=>addDays(start,i));
+  const arrKey=r?keyOf(lp(r.sim.arrive,TZ[R.d.cc])):null;
+  $('#calMeta').textContent=`${dayLabel(days[0])} – ${dayLabel(days[13])}`;
+  let h=`<table><thead><tr><th></th>${days.map(k=>{const d=parseKey(k);return `<th class="${k===S.vd?'vdh':''}">${DOW[d.getUTCDay()].slice(0,2)}<br>${d.getUTCDate()}</th>`}).join('')}</tr></thead><tbody>`;
+  ccs.forEach(cc=>{h+=`<tr><th class="rowh">${CNAME[cc]}</th>${days.map(k=>{const nb=nbKey(cc,k);const isHol=nb&&HOL[cc]&&HOL[cc][k];const cls=[isHol?'hol':nb?'we':'',k===S.vd?'vd':'',(cc===R.d.cc&&k===arrKey)?'arr':''].join(' ');return `<td class="${cls}" title="${esc(CNAME[cc]+' · '+dayLabel(k)+(nb?' · '+nb:' · business day'))}"></td>`}).join('')}</tr>`});
+  h+='</tbody></table>';$('#cal').innerHTML=h;
+}
+function renderDetail(){
+  const r=sel(),R=S.res,d=R.d;
+  if(!r){$('#detail').innerHTML='';return}
+  const steps=r.sim.steps;
+  let hops='';
+  steps.forEach((s,i)=>{
+    const b=s.bank,dl=s.delays.filter(x=>x.kind!=='cut'||true);
+    hops+=`<div class="hop ${s.delays.some(x=>x.kind==='cal'||x.kind==='batch')?'delay':''}">
+      <span class="cc">${b.cc} · ${esc(b.bic)}</span><b>${esc(b.name)}</b><span class="role">${esc(b.role)}</span>
+      <span class="t">In ${fmtT(s.arrive,b.cc)}</span>
+      ${s.delays.length?`<span class="d">${s.delays.slice(0,3).map(x=>esc((x.kind==='cut'?'Held: ':x.kind==='batch'?'Held: ':'Closed '+dayLabel(x.date)+': ')+x.reason)).join('<br>')}${s.delays.length>3?'<br>+'+(s.delays.length-3)+' more':''}</span>`:''}
+      <span class="t">Out ${fmtT(s.leave,b.cc)}</span>
+      <span class="muted" style="font-size:.72rem">Fee ${usd0(r.fees[i])}${r.fees[i]&&i===0?' (sender)':''}</span>
+    </div>`;
+    if(i<steps.length-1)hops+=`<div class="link"><span>${esc(rail(b,steps[i+1].bank,r,d))}</span><div class="ln"></div><span>${r.tpl.batch===i+1?'batch':''}</span></div>`;
+  });
+  const c=r.contrib||{};const labels={cost:'Cost',time:'Time to credit',rel:'Historical STP rate',cal:'Calendar exposure',aml:'Compliance risk',dl:'Deadline fit',pref:'Preferred relationship'};
+  const cmax=.6;
+  const contrib=r.contrib?Object.entries(labels).map(([k,l])=>{const v=c[k]||0;const w=Math.min(50,Math.abs(v)/cmax*50);return `<div class="crow"><span>${l}</span><span class="ctrack"><i style="${v>=0?`left:50%;width:${w}%;background:var(--good)`:`right:50%;width:${w}%;background:var(--bad)`}"></i></span><span class="num">${v>=0?'+':''}${(v*100).toFixed(1)}</span></div>`}).join(''):'<p class="muted">Not scored: this route is excluded by a rule.</p>';
+  const recipient=S.charges==='OUR'?'full amount, sender pays all fees':S.charges==='SHA'?'intermediary and lifting fees deducted':'all fees deducted';
+  $('#detail').innerHTML=`<div class="panel-h"><div class="ph"><h3>Route detail · ${esc(r.tpl.name)} via ${esc(r.tpl.via)}</h3></div>${r.reasons.length?'<span class="pill bad">Excluded</span>':S.res.el[0]===r?'<span class="pill good">Recommended</span>':'<span class="pill warn">Override</span>'}</div>
+  <div class="panel-b" style="display:grid;gap:16px">
+    <p class="muted" style="font-size:.84rem">${esc(r.tpl.note)}</p>
+    <div class="hops">${hops}</div>
+    <div class="two">
+      <div style="display:grid;gap:8px"><span class="eyebrow">Why the model scored it this way (SHAP contribution, points)</span><div class="contrib">${contrib}</div></div>
+      <div style="display:grid;gap:2px"><span class="eyebrow" style="margin-bottom:4px">Cost and FX breakdown</span>
+        <div class="kv"><span>Principal</span><span>${usd(S.amount)}</span></div>
+        <div class="kv"><span>Bank fees, all hops</span><span>${usd(r.feeTotal)}</span></div>
+        <div class="kv"><span>FX margin (${r.bps} bps on ${usd0(S.amount)})</span><span>${usd(r.fxCost)}</span></div>
+        <div class="kv"><span>Rate offered vs mid ${d.rate}</span><span>${r.rate.toFixed(d.dp===0?2:4)}</span></div>
+        <div class="kv"><span>Charges ${S.charges} (${recipient})</span><span>${usd(r.net)} converted</span></div>
+        <div class="kv"><span>Beneficiary receives</span><span><b>${money(r.bene,d.ccy,d.dp)}</b></span></div>
+        <div class="kv"><span>Credit window P50 / P90</span><span>${fmtH(r.sim.hours)} / ${fmtH(r.h90)}</span></div>
+        <div class="kv"><span>Historical straight-through rate</span><span>${(r.tpl.stp*100).toFixed(1)}%</span></div>
+      </div>
+    </div>
+  </div>`;
+}
+function rail(a,b,r,d){
+  if(r.tpl.key==='PAY')return a.key==='ORIG'?'Partner API · USD funding':d.local+' instant';
+  if(r.tpl.key==='ECO'&&a.key==='SG')return 'Net settlement';
+  if(b.key==='BENE')return d.local;
+  if(a.cc==='US'&&b.cc==='US')return 'Fedwire';
+  return 'SWIFT gpi · pacs.008';
+}
+
+/* ===================== history ===================== */
+const HCACHE={};
+const INCIDENTS={
+  JP:[{date:'2025-10-09',tpl:'GULF',amount:900000,cust:'FI',note:'Released Thursday. Manama closed Friday and Saturday, then US Columbus Day and Japan Sports Day fell on Monday 13 Oct. Credited Tuesday. This case taught the model the Gulf weekend rule.'},
+      {date:'2026-04-28',tpl:'EXP',amount:15000,cust:'Retail',note:'Showa Day on 29 Apr closed the Tokyo clearing bank. Golden Week risk is now a calendar feature.'},
+      {date:'2026-08-06',tpl:'ASIA',amount:42000,cust:'Retail',extra:6,outcome:'Repaired',note:'Lion City raised an RFI on the purpose code. Repaired after 6 h; purpose codes are now validated before release.'},
+      {date:'2026-09-17',tpl:'ECO',amount:600,cust:'Retail',note:'Released Thursday after the 16:00 SGT batch. Waited a full week for the next run.'}],
+  IN:[{date:'2026-09-12',tpl:'LDN',amount:7000,cust:'Retail',note:'Arrived on the 2nd Saturday of the month, a bank holiday in India. Credited Monday.'}],
+  AE:[{date:'2026-07-02',tpl:'GULF',amount:120000,cust:'FI',note:'Gulf Crescent closed Friday while Dubai was open. One day lost; the UAE moved to a Saturday–Sunday weekend in 2022, Bahrain did not.'}],
+  SA:[{date:'2026-06-11',tpl:'EXP',amount:30000,cust:'Retail',note:'Released Thursday afternoon US time. Riyadh closed Friday and Saturday; credited Sunday.'}],
+  DE:[{date:'2026-08-27',tpl:'LDN',amount:9000,cust:'Retail',note:'London summer bank holiday on 31 Aug delayed the Thames Commerce leg by one day.'}]
+};
+function caseHistory(cc){
+  if(HCACHE[cc])return HCACHE[cc];
+  const d=DEST[cc],rng=mulberry(cc.charCodeAt(0)*131+cc.charCodeAt(1));const rows=[];
+  const mk=(date,tk,amount,cust,extra,outcome,note)=>{const tpl=TPL[tk],hops=hopsFor(tpl,d);const sim=simulate(hops,tpl,startTime(date));
+    const bps=amount>=250000?tpl.fxL:tpl.fx;const fees=tpl.fees.reduce((a,b)=>a+b,0);const hours=sim.hours*(extra?1:(.85+rng()*.4))+(extra||0);
+    return {date,tpl:tk,amount,cust,hours,cost:fees+amount*bps/1e4,bps,outcome:outcome||'Credited',note:note||'',cal:sim.cal}};
+  for(let i=0;i<120;i++){
+    let k;do{k=addDays(TODAY_KEY,-Math.floor(rng()*540)-3)}while([0,6].includes(parseKey(k).getUTCDay()));
+    let tk=d.tpls[Math.floor(rng()*d.tpls.length)];
+    const fi=rng()<.3;let amount=fi?Math.round(Math.exp(11+rng()*3.2)/1000)*1000:Math.round(Math.exp(5.5+rng()*4.3)/10)*10;
+    if(TPL[tk].cap&&amount>TPL[tk].cap)tk='EXP';
+    const o=rng();rows.push(mk(k,tk,amount,fi?'FI':'Retail',0,o<.03?'Returned':o<.08?'Repaired':'Credited'));
+  }
+  (INCIDENTS[cc]||[]).forEach(x=>rows.push(mk(x.date,x.tpl,x.amount,x.cust,x.extra,x.outcome,x.note)));
+  rows.sort((a,b)=>a.date<b.date?1:-1);
+  HCACHE[cc]=rows;return rows;
+}
+function renderSimilar(){
+  const R=S.res,rows=caseHistory(S.dest),rec=R.el[0];
+  const vdDow=parseKey(S.vd).getUTCDay();
+  const scored=rows.map(x=>({x,s:Math.abs(Math.log(x.amount)-Math.log(S.amount))+(x.cust===S.cust?0:.6)+(x.note?-.5:0)+(parseKey(x.date).getUTCDay()===vdDow?-.3:0)})).sort((a,b)=>a.s-b.s).slice(0,6).map(o=>o.x);
+  const stat=(k)=>{const h=rows.filter(x=>x.tpl===k).map(x=>x.hours).sort((a,b)=>a-b);return h.length?{n:h.length,med:h[Math.floor(h.length/2)]}:null};
+  const st=rec?stat(rec.key):null;
+  $('#similar').innerHTML=`<div class="panel-h"><h3>Similar historical cases</h3><span class="muted" style="font-size:.74rem">Matched on corridor, amount, client type and release weekday</span></div>
+  <div class="panel-b" style="display:grid;gap:10px">
+    ${st?`<p style="font-size:.84rem">Across ${st.n} test cases on <b>${esc(rec.tpl.name)}</b> to ${esc(CNAME[S.dest])}, the median time to credit was <span class="num">${fmtH(st.med)}</span>. The model's estimate for this payment is <span class="num">${fmtH(rec.sim.hours)}</span>.</p>`:''}
+    <div class="tscroll"><table class="data"><thead><tr><th>Released</th><th>Route</th><th class="r">Amount</th><th>Client</th><th class="r">Took</th><th class="r">Cost</th><th>Outcome</th><th>Ops note</th></tr></thead><tbody>
+    ${scored.map(x=>`<tr class="${rec&&x.tpl===rec.key?'hl':''}"><td class="num">${dayLabel(x.date)} ${x.date.slice(0,4)}</td><td>${TPL[x.tpl].name}</td><td class="r num">${usd0(x.amount)}</td><td>${x.cust}</td><td class="r num">${fmtH(x.hours)}</td><td class="r num">${usd0(x.cost)}</td><td><span class="pill ${x.outcome==='Credited'?'good':x.outcome==='Repaired'?'warn':'bad'}">${x.outcome}</span></td><td style="min-width:220px;font-size:.76rem">${esc(x.note)||'<span class="muted">—</span>'}</td></tr>`).join('')}
+    </tbody></table></div>
+  </div>`;
+}
+
+/* ===================== approval & tracking ===================== */
+function renderApproval(){
+  const R=S.res,r=sel(),rec=R.el[0];if(!r||r.reasons.length){$('#approval').innerHTML='';return}
+  const d=R.d,isOverride=r!==rec,big=S.amount>1e6,retail=S.cust==='Retail'&&['EDUC','OTHR'].includes(S.purpose);
+  const checks=[
+    {id:'c-sanc',t:'Sanctions and watchlist screening',p:R.alert?`Possible match: “${S.bene}” and “${R.alert.entry}” (${R.alert.score}%). Confirm identity documents before release.`:'No match on OFAC SDN, UN, EU and UK HMT test lists for all parties and all banks on the route.',st:R.alert?['bad','Alert']:['good','Clear']},
+    {id:'c-travel',t:'Travel Rule data (transfers of $3,000 or more)',p:S.amount>=3000?'Originator and beneficiary name, address and account number present in the pacs.008.':'Below threshold; standard record keeping applies.',st:['good','Complete']},
+    {id:'c-addr',t:'ISO 20022 structured address',p:S.missingAddr?'Beneficiary town name is missing. CBPR+ rejects unstructured addresses from November 2026; request it from the client.':'Structured postal address complete for debtor and creditor.',st:S.missingAddr?['warn','Incomplete']:['good','Complete']},
+    retail?{id:'c-reg',t:'Remittance Transfer Rule disclosure',p:`Pre-payment disclosure generated: fees ${usd(r.feeTotal)}, rate ${r.rate.toFixed(d.dp===0?2:4)}, amount received ${money(r.bene,d.ccy,d.dp)}, date available ${fmtT(r.sim.arrive,d.cc)}. The 30-minute cancellation right applies.`,st:['good','Generated']}
+          :{id:'c-reg',t:'Counterparty limits and nostro funding',p:`Within credit lines at ${r.hops.filter(h=>h.inter).map(h=>h.name).join(', ')}. Nostro balance covers the principal.`,st:['good','Within limits']},
+    {id:'c-route',t:'Route and purpose',p:`${r.hops.length-2} intermediaries; highest internal jurisdiction rating ${['','Low','Medium','High'][r.risk]}. Purpose code ${S.purpose}.`,st:r.risk>1?['warn','Medium risk']:['good','Low risk']},
+    {id:'c-quote',t:'FX quote',p:'Rate held until 10:30 ET on the value date (test quote).',st:['good','Locked']}
+  ];
+  if(R.alert)checks.push({id:'c-l2',t:'L2 Compliance sign-off',p:'Compliance has reviewed the alert and recorded it as a false positive, with evidence attached to the case.',st:['bad','Required']});
+  if(big)checks.push({id:'c-dual',t:'Second checker (payments above $1M)',p:'A second approver from Treasury Operations confirms amount, route and value date.',st:['warn','Required']});
+  $('#approval').innerHTML=`<div class="panel-h"><div class="ph"><span class="step">4</span><h3>Human certification and release</h3></div><span class="pill ${S.released?'good':'warn'}">${S.released?'Released':'Awaiting checker'}</span></div>
+  <div class="panel-b"><div class="appr-grid">
+    <div style="display:grid;gap:10px">
+      <p style="font-size:.84rem">Prepared by <b>corridor-rank v3.4.1</b>. The checker confirms each item, then certifies the corridor. Nothing is sent until a person approves it.</p>
+      <div class="checks">${checks.map(c=>`<label class="chk"><input type="checkbox" class="hitl" id="${c.id}" ${S.released?'checked disabled':''}><span><b>${esc(c.t)}</b><p>${esc(c.p)}</p></span><span class="pill ${c.st[0]}">${c.st[1]}</span></label>`).join('')}</div>
+    </div>
+    <div style="display:grid;gap:12px;align-content:start">
+      <div style="display:grid;gap:2px">
+        <div class="kv"><span>Corridor</span><span>${esc(r.tpl.name)} · ${esc(r.tpl.via)}</span></div>
+        <div class="kv"><span>Amount</span><span>${usd(S.amount)} · ${S.charges}</span></div>
+        <div class="kv"><span>Beneficiary</span><span>${esc(S.bene||'—')}</span></div>
+        <div class="kv"><span>Expected credit</span><span>${fmtT(r.sim.arrive,d.cc)}</span></div>
+        <div class="kv"><span>Maker</span><span>Model + client request</span></div>
+      </div>
+      ${isOverride?`<div class="callout warn"><div class="grow"><b>You chose rank ${R.el.indexOf(r)+1} over the recommendation.</b> Give a reason; it is logged and used in retraining.</div></div><div class="field"><label for="why">Override reason</label><textarea id="why" class="input" style="min-height:60px" placeholder="For example: client asked for a Singapore-booked FX conversion">${esc(S.why||'')}</textarea></div>`:''}
+      <div class="field"><label for="approver">Checker</label><select id="approver" class="input" ${S.released?'disabled':''}>${APPROVERS.map(a=>`<option>${a}</option>`).join('')}</select></div>
+      <div class="actions"><button class="btn primary" id="btnApprove" disabled>Certify and release</button><button class="btn" id="btnReturn" ${S.released?'disabled':''}>Return to client</button><button class="btn danger" id="btnReject" ${S.released?'disabled':''}>Reject</button></div>
+      <p class="muted" style="font-size:.74rem" id="apprHint"></p>
+      <div id="tracker"></div>
+    </div>
+  </div></div>`;
+  const update=()=>{const all=[...document.querySelectorAll('.hitl')].every(x=>x.checked);const why=$('#why');const okWhy=!isOverride||(why&&why.value.trim().length>=12);
+    $('#btnApprove').disabled=S.released||!all||!okWhy;
+    $('#apprHint').textContent=S.released?'':!all?`${[...document.querySelectorAll('.hitl')].filter(x=>!x.checked).length} item(s) left to confirm.`:!okWhy?'Add an override reason of at least 12 characters.':'Ready to release.'};
+  document.querySelectorAll('.hitl').forEach(x=>x.onchange=update);
+  if($('#why'))$('#why').oninput=e=>{S.why=e.target.value;update()};
+  $('#btnApprove').onclick=()=>release(r);
+  $('#btnReturn').onclick=()=>{$('#apprHint').textContent='Returned to client with a request for the missing details. The case stays open.'};
+  $('#btnReject').onclick=()=>{$('#apprHint').textContent='Payment rejected. Reason captured in the audit log; funds are not debited.'};
+  update();if(S.released)renderTracker(r,true);
+}
+function uuid(){const r=mulberry(Date.now()%1e9);const h=[...Array(32)].map(()=>Math.floor(r()*16).toString(16));h[12]='4';h[16]=['8','9','a','b'][Math.floor(r()*4)];const s=h.join('');return `${s.slice(0,8)}-${s.slice(8,12)}-${s.slice(12,16)}-${s.slice(16,20)}-${s.slice(20)}`}
+function release(r){
+  S.released=true;S.uetr=uuid();const who=$('#approver').value;const now=new Date();const ts=`${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}`;
+  S.log=[`${ts} MODEL   corridor-rank v3.4.1 ranked ${S.res.el.length} routes; top=${S.res.el[0].key} score=${S.res.el[0].score}`,
+    `${ts} RULES   ${S.res.off.length} routes excluded: ${S.res.off.map(x=>x.key).join(', ')||'none'}`,
+    `${ts} CHECKER ${who} confirmed ${document.querySelectorAll('.hitl').length} items`,
+    r!==S.res.el[0]?`${ts} OVERRIDE selected=${r.key} reason="${(S.why||'').slice(0,60)}"`:`${ts} ROUTE   selected=${r.key} (model rank 1)`,
+    `${ts} RELEASE pacs.008 sent · UETR ${S.uetr}`];
+  renderApproval();
+}
+function renderTracker(r,animate){
+  const d=S.res.d,steps=r.sim.steps;const el=$('#tracker');
+  const items=steps.map((s,i)=>({t:i===0?'Payment initiated':i===steps.length-1?`Credited to beneficiary at ${s.bank.name}`:`Received by ${s.bank.name}`,code:i===steps.length-1?'ACCC':'ACSP',time:fmtT(i===steps.length-1?s.leave:s.start,s.bank.cc)}));
+  el.innerHTML=`<div style="display:grid;gap:8px;margin-top:6px"><div style="display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap"><span class="eyebrow">gpi tracker</span><span class="mono" style="font-size:.68rem;word-break:break-all">UETR ${S.uetr}</span></div>
+    <div class="track" id="trk">${items.map((x,i)=>`<div class="tstep pending" data-i="${i}"><span class="dot"></span><span class="tt">${esc(x.t)}<small>${x.time}</small></span><span class="pill plain">${x.code}</span></div>`).join('')}</div>
+    <p class="muted" style="font-size:.72rem">Simulated playback: ${fmtH(r.sim.hours)} compressed into a few seconds.</p>
+    <div class="audit">${S.log.map(esc).join('<br>')}</div></div>`;
+  const nodes=[...el.querySelectorAll('.tstep')];let i=0;
+  const reduce=window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const tick=()=>{nodes.forEach((n,j)=>{n.classList.toggle('done',j<i);n.classList.toggle('live',j===i);n.classList.toggle('pending',j>i);if(j<i||j===i&&i===nodes.length-1){const p=n.querySelector('.pill');p.className='pill '+(j===nodes.length-1&&j<=i?'good':'info')}});
+    if(i<nodes.length){i++;if(i===nodes.length){nodes.forEach(n=>{n.classList.add('done');n.classList.remove('live','pending')})}else setTimeout(tick,reduce?0:900)}};
+  tick();
+}
+
+/* ===================== history tab ===================== */
+function renderHistory(){
+  const cc=$('#histDest').value,d=DEST[cc],rows=caseHistory(cc);
+  const stats=d.tpls.map(k=>{const xs=rows.filter(x=>x.tpl===k);if(!xs.length)return null;const h=xs.map(x=>x.hours).sort((a,b)=>a-b);
+    return {k,n:xs.length,med:h[Math.floor(h.length/2)],p90:h[Math.min(h.length-1,Math.floor(h.length*.9))],bps:Math.round(xs.reduce((a,x)=>a+x.cost/x.amount*1e4,0)/xs.length),stp:xs.filter(x=>x.outcome==='Credited').length/xs.length}}).filter(Boolean);
+  const maxP=Math.max(...stats.map(s=>s.p90));
+  $('#histStats').innerHTML=`<table class="data"><thead><tr><th>Route</th><th class="r">Cases</th><th>Time to credit (median ▮ · P90 ┆)</th><th class="r">Avg cost</th><th class="r">STP</th></tr></thead><tbody>${stats.map(s=>`<tr><td>${TPL[s.k].name}<div class="muted" style="font-size:.72rem">via ${TPL[s.k].via}</div></td><td class="r num">${s.n}</td><td style="min-width:170px"><div style="position:relative;height:14px;background:var(--sunk);border-radius:2px;margin-top:3px"><i style="position:absolute;left:0;top:0;bottom:0;width:${s.med/maxP*100}%;background:var(--speed);border-radius:2px"></i><i style="position:absolute;top:-2px;bottom:-2px;left:${s.p90/maxP*100}%;width:2px;background:var(--ink)"></i></div><div class="num muted" style="font-size:.7rem;margin-top:2px">${fmtH(s.med)} · P90 ${fmtH(s.p90)}</div></td><td class="r num">${s.bps} bps</td><td class="r num">${(s.stp*100).toFixed(0)}%</td></tr>`).join('')}</tbody></table>`;
+  const inc=rows.filter(x=>x.note);
+  $('#histInc').innerHTML=inc.length?`<table class="data"><thead><tr><th>Released</th><th>Route</th><th class="r">Amount</th><th class="r">Took</th><th>What happened</th></tr></thead><tbody>${inc.map(x=>`<tr><td class="num" style="white-space:nowrap">${dayLabel(x.date)} ${x.date.slice(0,4)}</td><td>${TPL[x.tpl].name}</td><td class="r num">${usd0(x.amount)}</td><td class="r num">${fmtH(x.hours)}</td><td style="min-width:260px">${esc(x.note)}</td></tr>`).join('')}</tbody></table>`:'<p class="muted">No annotated incidents for this corridor.</p>';
+  $('#histCount').textContent=`${rows.length} test cases, newest first`;
+  $('#histAll').innerHTML=`<table class="data"><thead><tr><th>Released</th><th>Route</th><th class="r">Amount</th><th>Client</th><th class="r">Took</th><th class="r">Cost</th><th class="r">Non-business days</th><th>Outcome</th></tr></thead><tbody>${rows.slice(0,40).map(x=>`<tr><td class="num" style="white-space:nowrap">${dayLabel(x.date)} ${x.date.slice(0,4)}</td><td>${TPL[x.tpl].name}</td><td class="r num">${usd0(x.amount)}</td><td>${x.cust}</td><td class="r num">${fmtH(x.hours)}</td><td class="r num">${usd0(x.cost)}</td><td class="r num">${x.cal}</td><td><span class="pill ${x.outcome==='Credited'?'good':x.outcome==='Repaired'?'warn':'bad'}">${x.outcome}</span></td></tr>`).join('')}</tbody></table><p class="muted" style="font-size:.74rem;margin-top:8px">Showing the 40 most recent of ${rows.length}.</p>`;
+  renderFx(cc);
+}
+function renderFx(cc){
+  const d=DEST[cc],rng=mulberry(cc.charCodeAt(1)*977);const pegged=cc==='AE'||cc==='SA';const n=90,vals=[];let v=d.rate;
+  for(let i=0;i<n;i++){vals.unshift(v);v=pegged?d.rate*(1+(rng()-.5)*.0004):v*(1+(rng()-.5)*.012)}
+  const rets=vals.slice(1).map((x,i)=>Math.log(x/vals[i]));const mu=rets.reduce((a,b)=>a+b,0)/rets.length;const vol=Math.sqrt(rets.reduce((a,b)=>a+(b-mu)**2,0)/rets.length)*Math.sqrt(252)*100;
+  const W=520,H=230,ml=56,mr=16,mt=14,mb=30;const mn=Math.min(...vals),mx=Math.max(...vals),pad=(mx-mn)*.12||d.rate*.001;
+  const x=i=>ml+i/(n-1)*(W-ml-mr),y=v=>mt+(1-(v-(mn-pad))/((mx+pad)-(mn-pad)))*(H-mt-mb);
+  const dp=d.rate>10?2:4;const ticks=[mn,(mn+mx)/2,mx];
+  const line=vals.map((v,i)=>`${i?'L':'M'}${x(i).toFixed(1)},${y(v).toFixed(1)}`).join(' ');
+  const area=line+` L${x(n-1)},${H-mb} L${x(0)},${H-mb} Z`;
+  const months=[];for(let i=0;i<n;i+=30){const k=addDays(TODAY_KEY,i-n+1);months.push([i,dayLabel(k).slice(4)])}
+  $('#fxTitle').textContent=`USD/${d.ccy}, last 90 days`;
+  $('#fxChart').innerHTML=`<svg viewBox="0 0 ${W} ${H}" width="100%" style="min-width:380px;display:block" role="img" aria-label="USD/${d.ccy} rate over 90 days">
+    ${ticks.map(t=>`<line x1="${ml}" x2="${W-mr}" y1="${y(t)}" y2="${y(t)}" stroke="var(--line)"/><text x="${ml-8}" y="${y(t)+4}" text-anchor="end" font-size="10" fill="var(--muted)">${t.toFixed(dp)}</text>`).join('')}
+    ${months.map(([i,l])=>`<text x="${x(i)}" y="${H-10}" text-anchor="middle" font-size="10" fill="var(--muted)">${l}</text>`).join('')}
+    <path d="${area}" fill="var(--accent)" opacity=".1"/><path d="${line}" fill="none" stroke="var(--accent)" stroke-width="1.8"/>
+    <circle cx="${x(n-1)}" cy="${y(vals[n-1])}" r="4" fill="var(--accent)"/><text x="${x(n-1)-8}" y="${y(vals[n-1])-9}" text-anchor="end" font-size="11" fill="var(--ink)">${vals[n-1].toFixed(dp)}</text>
+  </svg><p class="muted" style="font-size:.76rem;margin-top:6px">Annualised volatility ${vol.toFixed(1)}%${pegged?' · currency is pegged to USD, so FX timing risk is negligible':'. Volatility enters the model as a feature: higher volatility favours faster conversion.'}</p>`;
+}
+function renderFI(){
+  const F=[['Calendar exposure (holidays, weekends) per bank',.19],['Cut-off proximity at each hop',.15],['Corridor × amount band',.13],['FX margin tier at conversion bank',.12],['Historical STP rate of the route',.10],['Number of hops',.08],['FX volatility, 30-day',.07],['Release hour and weekday',.06],['Correspondent nostro liquidity',.05],['Compliance risk rating',.05]];
+  $('#fiList').innerHTML=F.map(([l,v])=>`<div class="fi"><span>${l}</span><span class="bar"><i style="width:${v/.19*100}%"></i></span><span class="num" style="text-align:right">${(v*100).toFixed(0)}%</span></div>`).join('');
+}
+
+/* ===================== wiring ===================== */
+function loadScenario(i){
+  const sc=SCEN[i];S.scen=i;S.text=sc.text;S.bene=sc.bene;S.missingAddr=!!sc.missingAddr;S.why='';
+  const {out,chips}=interpret(sc.text);Object.assign(S,out,sc.over);S.parsed=chips;
+  S.excluded=new Set();S.avoid=true;
+  document.querySelectorAll('.scen-btn').forEach((b,j)=>b.setAttribute('aria-pressed',j===i));
+  writeForm();run();
+}
+$('#scenGrid').innerHTML=SCEN.map((s,i)=>`<button class="scen-btn" data-scen="${i}" aria-pressed="false"><span class="k">${esc(s.k)}</span><b>${esc(s.t)}</b><span>${esc(s.s)}</span></button>`).join('');
+$('#scenGrid').onclick=e=>{const b=e.target.closest('[data-scen]');if(b)loadScenario(+b.dataset.scen)};
+$('#btnInterpret').onclick=()=>{S.text=$('#req').value;const {out,chips}=interpret(S.text);readForm();Object.assign(S,out);S.parsed=chips;S.missingAddr=false;document.querySelectorAll('.scen-btn').forEach(b=>b.setAttribute('aria-pressed','false'));writeForm();run()};
+$('#btnRun').onclick=()=>run(true);
+$('#segCust').onclick=e=>{const b=e.target.closest('button');if(!b)return;S.cust=b.dataset.v;document.querySelectorAll('#segCust button').forEach(x=>x.setAttribute('aria-pressed',x===b));run(true)};
+['#dest','#charges','#vd','#deadline','#purpose','#avoid'].forEach(id=>$(id).addEventListener('change',()=>run(true)));
+$('#amount').addEventListener('change',()=>run(true));
+$('#bene').addEventListener('change',()=>run(true));
+$('#prio').addEventListener('input',prioText);
+$('#prio').addEventListener('change',()=>run(true));
+$('#corrList').addEventListener('change',e=>{const k=e.target.dataset.k;if(!k)return;e.target.checked?S.excluded.delete(k):S.excluded.add(k);run(true)});
+$('#corrList').addEventListener('click',e=>{const b=e.target.closest('[data-star]');if(!b)return;const k=b.dataset.star;S.preferred.has(k)?S.preferred.delete(k):S.preferred.add(k);b.setAttribute('aria-pressed',S.preferred.has(k));run(true)});
+const pick=e=>{const b=e.target.closest('[data-route]');if(!b||!b.dataset.route)return;const r=S.res.routes.find(x=>x.key===b.dataset.route);if(!r||r.reasons.length)return;S.selected=r.key;S.released=false;S.why='';renderRoutes();renderPareto();renderCal();renderDetail();renderApproval()};
+$('#routes').addEventListener('click',pick);$('#pareto').addEventListener('click',pick);
+document.querySelectorAll('.tab').forEach(t=>t.onclick=()=>{document.querySelectorAll('.tab').forEach(x=>x.setAttribute('aria-selected',x===t));
+  $('#view-route').hidden=t.dataset.tab!=='route';$('#view-hist').hidden=t.dataset.tab!=='hist';$('#view-model').hidden=t.dataset.tab!=='model';
+  if(t.dataset.tab==='hist'){$('#histDest').value=S.dest;renderHistory()}});
+$('#histDest').onchange=renderHistory;
+renderFI();
+loadScenario(0);
+</script>

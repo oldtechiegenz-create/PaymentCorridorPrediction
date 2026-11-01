@@ -15,6 +15,7 @@ Everything here is test data. Banks, BICs, clients, FX rates and outcomes are fi
 | `code/scripts/generate_history.py` | Builds the database from the reference data |
 | `historical_cases.sql` | Parameterised queries for each panel of the Historical Cases tab and the similar-cases panel |
 | `code/scripts/train_baseline.py` | Trains a LightGBM ranker and regressors on the history, to show the data supports model predictions |
+| `code/prediction_service/` | Prediction service (step 1C): trains and saves the models, serves them through a FastAPI app, plus an HTTP client and an evaluation script that replays the test payments through the API |
 
 ## Quick start
 
@@ -26,6 +27,16 @@ pip install lightgbm pandas     # baseline models only
 python3 code/scripts/generate_history.py --payments 40000 --seed 42   # about 30 seconds
 python3 code/scripts/train_baseline.py --split 2026-04-01
 ```
+
+Prediction API (`pip install -r code/requirements.txt`, then from `code/`):
+
+```bash
+python3 -m prediction_service.train                          # saves models to prediction_service/artifacts/
+python3 -m uvicorn prediction_service.api:app --port 8000    # docs at http://127.0.0.1:8000/docs
+python3 -m prediction_service.evaluate_api                   # replays the test payments through the API
+```
+
+`POST /v1/routes/rank` takes the payment (corridor, beneficiary bank, client type, amount, priority, release time, deadline flag). It simulates every route, then returns them ranked with the simulator estimate, the predicted time and cost, the model score and the v1 heuristic score. Routes the payment can't use are listed with their reasons. Use `--train-until all` to train the production model on all history.
 
 `--payments`, `--start`, `--end` and `--seed` control volume, window and reproducibility. The same seed always gives the same database. At 40,000 payments the file is about 65 MB; it scales roughly linearly.
 
@@ -98,7 +109,7 @@ Time-to-credit error on routes under 72 hours is 3.4 hours for LightGBM, against
 | --- | --- | --- |
 | 1A Historical data foundation | SQLite schema, reference data, calendars, synthetic history, tab queries, baseline models | Done (this package) |
 | 1B Route engine and rules | `engine.py` reading reference data from SQLite; rules with reason codes; calendar-conflict rule | Next |
-| 1C Prediction service | v1 heuristic score, plus LightGBM ranker and time/cost regressors trained from `v_ranking_training`, with P50/P90 and score explanations. Runs in shadow until real data replaces the synthetic history | |
+| 1C Prediction service | v1 heuristic score, plus LightGBM ranker and time/cost regressors trained from `v_ranking_training`, with P50/P90 and score explanations. Runs in shadow until real data replaces the synthetic history | In progress: API, ranker and regressors in `code/prediction_service/`; P50/P90 and explanations to do |
 | 1D Console | Route tab on the engine API; Historical Cases tab and similar cases served from SQLite | |
 | 1E Parallel run with the partner bank | Load the bank's exports into the same tables, retrain, and measure agreement with ops | |
 

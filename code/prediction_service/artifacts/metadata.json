@@ -1,0 +1,51 @@
+{
+  "model_version": "lgbm-20261101T175656Z",
+  "trained_at_utc": "2026-11-01T17:56:56+00:00",
+  "train_until": "2026-04-01",
+  "train_payments": 30335,
+  "train_rows": 128332,
+  "features": [
+    "est_hours",
+    "naive_hours",
+    "est_cost_usd",
+    "fee_total_usd",
+    "fx_bps",
+    "hop_count",
+    "intermediaries",
+    "est_nonbusiness_days",
+    "calendar_conflict",
+    "cutoff_slack_hours",
+    "max_risk",
+    "stp_rate_nominal",
+    "priority",
+    "log_amount",
+    "is_fi",
+    "release_hour_et",
+    "release_weekday",
+    "day_of_month",
+    "has_deadline",
+    "tpl",
+    "corr",
+    "bene"
+  ],
+  "lightgbm_version": "4.6.0",
+  "holdout": {
+    "ops": {
+      "ndcg_at_3": 0.8825,
+      "top1": 0.8008
+    },
+    "heuristic": {
+      "ndcg_at_3": 0.9752,
+      "top1": 0.9162
+    },
+    "model": {
+      "ndcg_at_3": 0.9794,
+      "top1": 0.9447
+    },
+    "time_mae_hours_under_72h": {
+      "simulator": 3.612,
+      "model": 3.424
+    },
+    "cost_mape_pct": 4.586
+  }
+}

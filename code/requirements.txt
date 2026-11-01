@@ -1,0 +1,7 @@
+holidays>=0.83
+numpy>=1.26
+pandas>=2.0
+lightgbm>=4.0
+fastapi>=0.110
+uvicorn>=0.29
+requests>=2.31

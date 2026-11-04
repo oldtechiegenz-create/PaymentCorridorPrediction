@@ -283,6 +283,70 @@ SELECT corridor_id, substr(value_date, 1, 7) AS month, COUNT(*) AS payments,
        ROUND(AVG(stp) * 100.0, 1) AS stp_pct
 FROM payment GROUP BY corridor_id, month;
 
+-- Reporting window for the Historical Cases tab: the 18 calendar months up to the newest payment.
+-- Anchored to the data, not the wall clock, so the tab reads the same for a fixed extract.
+CREATE VIEW v_history_window AS
+SELECT MAX(value_date) AS as_of,
+       date(MAX(value_date), 'start of month', '-17 months') AS window_start
+FROM payment;
+
+-- One row per corridor for the corridor picker: names, currency, volumes and date range
+CREATE VIEW v_corridor_overview AS
+SELECT c.rowid AS sort_order, c.corridor_id, c.dest_country, co.name AS country_name,
+       c.currency_code, cu.name AS currency_name, cu.pegged_to_usd, c.local_rail,
+       COALESCE(s.cases, 0) AS cases, s.first_value_date, s.last_value_date,
+       COALESCE(n.incidents, 0) AS incidents
+FROM corridor c
+JOIN country co ON co.code = c.dest_country
+JOIN currency cu ON cu.code = c.currency_code
+LEFT JOIN (SELECT corridor_id, COUNT(*) AS cases, MIN(value_date) AS first_value_date, MAX(value_date) AS last_value_date
+           FROM payment GROUP BY corridor_id) s ON s.corridor_id = c.corridor_id
+LEFT JOIN (SELECT p.corridor_id, COUNT(*) AS incidents
+           FROM incident i JOIN payment p ON p.payment_id = i.payment_id GROUP BY p.corridor_id) n ON n.corridor_id = c.corridor_id;
+
+-- Route performance over v_history_window, one row per route the corridor offers (routes with no cases
+-- in the window keep a row with cases = 0). low_sample = 1 below 50 cases: the P90 then rests on a few payments.
+CREATE VIEW v_route_performance_18m AS
+WITH w AS MATERIALIZED (SELECT as_of, window_start FROM v_history_window),
+base AS MATERIALIZED (   -- scalar subquery, not a join, so the window is computed once rather than per payment
+  SELECT p.corridor_id, p.template_id, p.hours_to_credit, p.all_in_cost_usd, p.amount_usd, p.stp, p.outcome
+  FROM payment p WHERE p.value_date >= (SELECT window_start FROM w)
+), agg AS (
+  SELECT corridor_id, template_id, COUNT(*) AS cases,
+         ROUND(AVG(all_in_cost_usd), 2) AS avg_cost_usd,
+         ROUND(SUM(all_in_cost_usd) * 10000.0 / SUM(amount_usd), 1) AS cost_bps,   -- value-weighted
+         ROUND(AVG(stp) * 100.0, 1) AS stp_pct,
+         ROUND(AVG(outcome = 'Returned') * 100.0, 2) AS returned_pct
+  FROM base GROUP BY corridor_id, template_id
+), ranked AS (
+  SELECT corridor_id, template_id, hours_to_credit AS h,
+         ROW_NUMBER() OVER (PARTITION BY corridor_id, template_id ORDER BY hours_to_credit) AS rn,
+         COUNT(*)     OVER (PARTITION BY corridor_id, template_id) AS n
+  FROM base WHERE hours_to_credit IS NOT NULL
+), pct AS (
+  SELECT corridor_id, template_id,
+         MAX(CASE WHEN rn = (n + 1) / 2 THEN h END) AS median_hours,
+         MAX(CASE WHEN rn = MAX(1, CAST(ROUND(0.9 * n) AS INTEGER)) THEN h END) AS p90_hours
+  FROM ranked GROUP BY corridor_id, template_id
+)
+SELECT cr.corridor_id, cr.template_id, t.name AS route_name, t.via, w.window_start, w.as_of,
+       COALESCE(a.cases, 0) AS cases,
+       ROUND(p.median_hours, 1) AS median_hours, ROUND(p.p90_hours, 1) AS p90_hours,
+       a.avg_cost_usd, a.cost_bps, a.stp_pct, a.returned_pct,
+       CASE WHEN COALESCE(a.cases, 0) < 50 THEN 1 ELSE 0 END AS low_sample
+FROM corridor_route cr
+JOIN route_template t ON t.template_id = cr.template_id
+CROSS JOIN w
+LEFT JOIN agg a ON a.corridor_id = cr.corridor_id AND a.template_id = cr.template_id
+LEFT JOIN pct p ON p.corridor_id = cr.corridor_id AND p.template_id = cr.template_id;
+
+-- Daily FX mid rate per corridor (units of the corridor currency per 1 USD; one row per calendar day)
+CREATE VIEW v_fx_corridor AS
+SELECT co.corridor_id, f.currency_code, f.rate_date, f.mid_rate, cu.pegged_to_usd, f.source
+FROM fx_rate_daily f
+JOIN corridor co ON co.currency_code = f.currency_code
+JOIN currency cu ON cu.code = f.currency_code;
+
 -- Ranking training set: one row per (payment, candidate route) with features known at release
 -- and the realised label. Group by payment_id for LambdaRank; filter eligible = 1.
 CREATE VIEW v_ranking_training AS

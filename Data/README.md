@@ -13,7 +13,7 @@ Everything here is test data. Banks, BICs, clients, FX rates and outcomes are fi
 | `reference.py` | Banks, corridors, route templates, fees, FX anchors (mirrors the demo portal) |
 | `engine.py` | Banking calendar and hop-by-hop route simulation. This is the core of MVP 1 modules M3 and M6, reusable by the route engine |
 | `generate_history.py` | Builds the database from the reference data |
-| `historical_cases.sql` | Parameterised queries for each panel of the Historical Cases tab and the similar-cases panel |
+| `historical_cases.sql` | Named queries over the views, one or more per panel of the Historical Cases tab and the similar-cases panel; the history API loads them by name |
 | `train_baseline.py` | Trains a LightGBM ranker and regressors on the history, to show the data supports model predictions |
 
 ## Quick start
@@ -42,7 +42,7 @@ python3 train_baseline.py --db corridoriq_history.db --split 2026-04-01
 | `bank`, `corridor`, `route_template`, `route_template_hop`, `corridor_route`, `beneficiary_bank`, `bank_closure`, `country`, `currency`, `cause_code` | small | Reference data |
 | `meta` | 11 | Generator version, seed, window and label definition |
 
-Views: `v_case`, `v_route_performance`, `v_incident`, `v_corridor_monthly`, `v_ranking_training`.
+Views: `v_case`, `v_route_performance`, `v_incident`, `v_corridor_monthly`, `v_history_window`, `v_corridor_overview`, `v_route_performance_18m`, `v_fx_corridor`, `v_ranking_training`.
 
 ## How the history is generated
 
@@ -67,17 +67,22 @@ Views: `v_case`, `v_route_performance`, `v_incident`, `v_corridor_monthly`, `v_r
 - **Labels.** `utility` combines realised time and cost, weighted by the payment's priority (0 = cost, 100 = speed). Returns are penalised, as are credits after the client's deadline. `relevance` is 4 for the best realised route, then 3, 2 and 1. The exact formula is in `meta.label_definition`.
 - **Seeded incidents.** The eight incidents described in the portal appear as real cases, for example the Gulf-weekend case of 9 October 2025 and the Showa Day case. Their notes come from the simulation itself.
 
-## Which query feeds which panel
+## Which view, query and endpoint feeds which panel
 
-| Portal panel | Source |
-| --- | --- |
-| Route performance (cases, median, P90, cost, STP) | `historical_cases.sql` query 1, or the all-time `v_route_performance` view |
-| FX rate, last 90 days | Query 2. Volatility is computed in the app from daily log returns |
-| Annotated incidents | Query 3, from the `v_incident` view |
-| All cases | Query 4, from the `v_case` view |
-| Similar historical cases (route tab) | Queries 5 and 6 |
-| Banking calendar (route tab) | Query 7, plus `country.weekend_days` and `bank_closure` |
-| Model training | The `v_ranking_training` view |
+The joins and aggregates live in views (`schema.sql`). `historical_cases.sql` holds named queries (`-- name: ...`) that only filter, order and page those views; the API (`code/prediction_service/history_repository.py`) loads them by name. All endpoints are `GET` under `/v1/history/corridors`.
+
+| Portal panel | View | Named query | Endpoint |
+| --- | --- | --- | --- |
+| Corridor picker, "test data to" date | `v_corridor_overview`, `v_history_window` | `corridors`, `history_window` | `/v1/history/corridors` |
+| Route performance, last 18 months (cases, median, P90, cost, STP, low sample) | `v_route_performance_18m` | `route_performance` | `.../{corridor_id}/route-performance` |
+| FX rate, last 90 days | `v_fx_corridor` | `fx_series` (volatility computed in the API) | `.../{corridor_id}/fx?days=90` |
+| Annotated incidents, with cause filter | `v_incident` | `incidents`, `incident_count`, `incident_categories` | `.../{corridor_id}/incidents?category=&limit=&offset=` |
+| All cases, with route and outcome filters | `v_case` | `cases`, `case_count` | `.../{corridor_id}/cases?route=&outcome=&limit=&offset=` |
+| Similar historical cases (route tab) | `v_case`, `v_route_performance_18m` | `similar_cases`, `route_summary` | `.../{corridor_id}/similar-cases?amount_usd=&client_type=&value_date=&template_id=` |
+| Banking calendar (route tab) | `holiday`, plus `country.weekend_days` and `bank_closure` | `holidays` | not served yet |
+| Model training | `v_ranking_training` | | |
+
+The 18-month window ends at the newest value date in the data, not today, so a fixed extract always reads the same. After changing a view, run `python3 code/scripts/apply_views.py` to recreate the views in an existing database without regenerating it.
 
 ## Model readiness check
 

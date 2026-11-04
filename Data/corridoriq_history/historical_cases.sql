@@ -1,76 +1,109 @@
 -- Queries behind the portal's Historical Cases tab and the "Similar historical cases" panel.
--- Named parameters (:corridor, :since, ...) work with Python sqlite3, better-sqlite3 and most drivers.
+--
+-- Each query starts with a "-- name: <name>" line; code/prediction_service/history_repository.py
+-- loads them by that name, so this file is the single source of the tab's SQL. The joins and
+-- aggregates live in the views (schema.sql: v_corridor_overview, v_route_performance_18m,
+-- v_fx_corridor, v_incident, v_case, v_history_window); the queries only filter, order and page.
+--
+-- Named parameters work with Python sqlite3, better-sqlite3 and most drivers.
 -- :corridor is a corridor_id such as 'USD-JPY'. Dates are 'YYYY-MM-DD'.
+-- Optional filters are passed as NULL to mean "any".
 
--- 1. Route performance for a corridor since a date (portal: "Route performance, last 18 months")
---    :since = 18 months before the latest value_date, e.g. '2025-04-01'
---    low_sample = 1 when a route has fewer than 50 cases: its P90 rests on a handful of payments,
---    so the tab should show it as indicative only.
-WITH base AS (
-  SELECT * FROM payment WHERE corridor_id = :corridor AND value_date >= :since
-), ranked AS (
-  SELECT template_id, hours_to_credit AS h,
-         ROW_NUMBER() OVER (PARTITION BY template_id ORDER BY hours_to_credit) AS rn,
-         COUNT(*)     OVER (PARTITION BY template_id) AS n
-  FROM base WHERE hours_to_credit IS NOT NULL
-)
-SELECT b.template_id, t.name AS route_name, t.via, COUNT(*) AS cases,
-       (SELECT ROUND(h, 1) FROM ranked r WHERE r.template_id = b.template_id AND r.rn = (r.n + 1) / 2) AS median_hours,
-       (SELECT ROUND(h, 1) FROM ranked r WHERE r.template_id = b.template_id AND r.rn = MAX(1, CAST(ROUND(0.9 * r.n) AS INTEGER))) AS p90_hours,
-       ROUND(SUM(b.all_in_cost_usd) * 10000.0 / SUM(b.amount_usd), 1) AS cost_bps,
-       ROUND(AVG(b.stp) * 100.0, 1) AS stp_pct,
-       CASE WHEN COUNT(*) < 50 THEN 1 ELSE 0 END AS low_sample
-FROM base b JOIN route_template t ON t.template_id = b.template_id
-GROUP BY b.template_id
-ORDER BY median_hours;
+-- name: history_window
+-- Newest value date in the data and the start of the 18-month reporting window.
+SELECT as_of, window_start FROM v_history_window;
 
--- 2. FX rate, last 90 days (annualised volatility = stdev of daily log returns x sqrt(252), computed in the app)
-SELECT f.rate_date, f.mid_rate, c.pegged_to_usd
-FROM fx_rate_daily f
-JOIN corridor co ON co.currency_code = f.currency_code
-JOIN currency c ON c.code = f.currency_code
-WHERE co.corridor_id = :corridor
-  AND f.rate_date > date((SELECT MAX(rate_date) FROM fx_rate_daily), '-90 days')
-ORDER BY f.rate_date;
+-- name: corridors
+-- Corridor picker. The API loads this once at startup and also uses it to reject unknown corridors.
+SELECT corridor_id, dest_country, country_name, currency_code, currency_name, pegged_to_usd, local_rail,
+       cases, first_value_date, last_value_date, incidents
+FROM v_corridor_overview
+ORDER BY sort_order;
 
--- 3. Annotated incidents for a corridor, newest first
-SELECT value_date, route_name, amount_usd, hours_to_credit, outcome, cause, note
+-- name: route_performance
+-- "Route performance, last 18 months": fastest median first, routes with no cases last.
+SELECT template_id, route_name, via, cases, median_hours, p90_hours, avg_cost_usd, cost_bps,
+       stp_pct, returned_pct, low_sample, window_start, as_of
+FROM v_route_performance_18m
+WHERE corridor_id = :corridor
+ORDER BY cases = 0, median_hours, template_id;
+
+-- name: fx_series
+-- Daily mid rate for the last :days days of data. Annualised volatility is computed in the API
+-- (stdev of daily log returns x sqrt(365), as the series has a rate for every calendar day).
+SELECT rate_date, mid_rate
+FROM v_fx_corridor
+WHERE corridor_id = :corridor
+  AND rate_date > date((SELECT MAX(rate_date) FROM v_fx_corridor WHERE corridor_id = :corridor), '-' || :days || ' days')
+ORDER BY rate_date;
+
+-- name: incident_categories
+-- Incident counts by cause category, for the filter chips.
+SELECT category, COUNT(*) AS incidents
 FROM v_incident
 WHERE corridor_id = :corridor
-ORDER BY released_at_utc DESC
-LIMIT :limit;
+GROUP BY category
+ORDER BY incidents DESC, category;
 
--- 4. All cases for a corridor, newest first, with a total for the header ("N cases, newest first")
-SELECT COUNT(*) AS total_cases FROM payment WHERE corridor_id = :corridor;
+-- name: incident_count
+SELECT COUNT(*) AS total
+FROM v_incident
+WHERE corridor_id = :corridor AND (:category IS NULL OR category = :category);
 
-SELECT value_date, route_name, amount_usd, client_type, hours_to_credit, all_in_cost_usd, nonbusiness_days, outcome
-FROM v_case
-WHERE corridor_id = :corridor
-ORDER BY released_at_utc DESC
+-- name: incidents
+-- Annotated incidents, newest first. :category NULL = all.
+SELECT incident_id, payment_id, value_date, released_at_utc, template_id, route_name, amount_usd, client_type,
+       hours_to_credit, outcome, cause_code, category, cause, note
+FROM v_incident
+WHERE corridor_id = :corridor AND (:category IS NULL OR category = :category)
+ORDER BY released_at_utc DESC, incident_id DESC
 LIMIT :limit OFFSET :offset;
 
--- 5. Similar historical cases for a new request (route tab)
---    Matches the portal's scoring: amount closeness (ratio), same client type, annotated cases first, same release weekday,
---    and recent cases first (each year of age weighs x1.3, so a two-year-old case needs a much closer amount to rank).
---    :amount (USD), :client_type ('Retail' or 'FI'), :weekday (0 = Sunday .. 6 = Saturday)
-SELECT value_date, route_name, template_id, amount_usd, client_type, hours_to_credit, all_in_cost_usd, outcome, ops_note
+-- name: case_count
+SELECT COUNT(*) AS total
+FROM v_case
+WHERE corridor_id = :corridor
+  AND (:route IS NULL OR template_id = :route)
+  AND (:outcome IS NULL OR outcome = :outcome);
+
+-- name: cases
+-- All cases, newest first. :route and :outcome NULL = all.
+SELECT payment_id, uetr, value_date, released_at_utc, template_id, route_name, amount_usd, client_type,
+       charges, purpose_code, hours_to_credit, all_in_cost_usd, cost_bps, nonbusiness_days, outcome, stp, ops_note
+FROM v_case
+WHERE corridor_id = :corridor
+  AND (:route IS NULL OR template_id = :route)
+  AND (:outcome IS NULL OR outcome = :outcome)
+ORDER BY released_at_utc DESC, payment_id DESC
+LIMIT :limit OFFSET :offset;
+
+-- name: similar_cases
+-- Similar historical cases for a new request (Route tab). Lower score = more similar. Each factor:
+--   amount closeness as a ratio (x2 amount or a half scores 2.0);
+--   other client type x1.82; annotated cases x0.61 (they explain what happened); same release weekday x0.74;
+--   age: x1.3 per year before the newest data, so recent cases win ties.
+-- :amount (USD), :client_type ('Retail' or 'FI'), :value_date (the new payment's value date), :limit
+SELECT payment_id, value_date, released_at_utc, template_id, route_name, amount_usd, client_type,
+       hours_to_credit, all_in_cost_usd, outcome, ops_note
 FROM v_case
 WHERE corridor_id = :corridor
 ORDER BY (MAX(amount_usd / :amount, :amount / amount_usd)
           * CASE WHEN client_type = :client_type THEN 1.0 ELSE 1.82 END
           * CASE WHEN ops_note IS NOT NULL THEN 0.61 ELSE 1.0 END
-          * CASE WHEN CAST(strftime('%w', value_date) AS INTEGER) = :weekday THEN 0.74 ELSE 1.0 END
-          * (1.0 + 0.3 * (julianday((SELECT MAX(value_date) FROM payment)) - julianday(value_date)) / 365.0))
-LIMIT 6;
+          * CASE WHEN strftime('%w', value_date) = strftime('%w', :value_date) THEN 0.74 ELSE 1.0 END
+          * (1.0 + 0.3 * (julianday((SELECT as_of FROM v_history_window)) - julianday(value_date)) / 365.0)),
+         released_at_utc DESC
+LIMIT :limit;
 
--- 6. Median time to credit on one route (sentence above the similar-cases table)
-WITH r AS (
-  SELECT hours_to_credit AS h, ROW_NUMBER() OVER (ORDER BY hours_to_credit) AS rn, COUNT(*) OVER () AS n
-  FROM payment WHERE corridor_id = :corridor AND template_id = :template AND hours_to_credit IS NOT NULL
-)
-SELECT MAX(n) AS cases, ROUND(MAX(CASE WHEN rn = (n + 1) / 2 THEN h END), 1) AS median_hours FROM r;
+-- name: route_summary
+-- Cases and median time to credit on one route over the 18-month window (sentence above the similar cases).
+SELECT template_id, route_name, cases, median_hours, p90_hours, low_sample
+FROM v_route_performance_18m
+WHERE corridor_id = :corridor AND template_id = :template;
 
--- 7. Calendar for the route tab: non-business days by country in a window
-SELECT country_code, holiday_date, name FROM holiday
+-- name: holidays
+-- Non-business days by country in a window (for the Route tab calendar; not served by the API yet).
+SELECT country_code, holiday_date, name
+FROM holiday
 WHERE holiday_date BETWEEN :from AND :to
 ORDER BY holiday_date, country_code;

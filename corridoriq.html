@@ -93,6 +93,7 @@ textarea.input{resize:vertical;min-height:84px;line-height:1.45;background:var(-
 .seg{display:flex;background:var(--sunk);border:1px solid var(--line);border-radius:6px;padding:2px}
 .seg button{flex:1;border:0;background:transparent;padding:5px 6px;border-radius:4px;cursor:pointer;color:var(--muted);font-size:.82rem;font-weight:500}
 .seg button[aria-pressed="true"]{background:var(--surface);color:var(--ink);box-shadow:0 1px 2px rgb(0 0 0 / .1)}
+#incCats button{flex:0 0 auto;white-space:nowrap;padding-inline:10px}
 .btn{border:1px solid var(--line-strong);background:var(--surface);border-radius:6px;padding:7px 12px;cursor:pointer;font-weight:600;font-size:.85rem;display:inline-flex;gap:6px;align-items:center;justify-content:center}
 .btn:hover{background:var(--sunk)}
 .btn.primary{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
@@ -384,19 +385,28 @@ table.data tr.hl td{background:var(--accent-soft)}
 </section>
 
 <!-- ============ HISTORY TAB ============ -->
+<!-- Every panel is filled from the CorridorIQ API (/v1/history/...), which reads the history database views. -->
 <section id="view-hist" class="wrap" hidden>
   <div class="page">
     <div style="display:flex;gap:14px;align-items:end;flex-wrap:wrap;justify-content:space-between">
-      <div style="display:grid;gap:4px"><span class="eyebrow">Historical cases</span><h2>What actually happened on each corridor</h2><p class="muted" style="max-width:68ch">Settled payments feed the model. Each row records where the payment went, how long it took, what it cost, and any delay the operations team annotated.</p></div>
+      <div style="display:grid;gap:4px"><span class="eyebrow">Historical cases</span><h2>What actually happened on each corridor</h2><p class="muted" style="max-width:68ch">Settled payments feed the model. Each row records where the payment went, how long it took, what it cost, and any delay the operations team annotated.<span id="histAsOf"></span></p></div>
       <div class="field" style="min-width:200px"><label for="histDest">Corridor</label>
         <select id="histDest" class="input"><option value="JP">USD → JPY · Japan</option><option value="IN">USD → INR · India</option><option value="AE">USD → AED · UAE</option><option value="SA">USD → SAR · Saudi Arabia</option><option value="DE">USD → EUR · Germany</option></select></div>
     </div>
     <div class="two">
-      <div class="panel"><div class="panel-h"><h3>Route performance, last 18 months</h3></div><div class="panel-b tscroll" id="histStats"></div></div>
+      <div class="panel"><div class="panel-h"><h3>Route performance, last 18 months</h3><span class="muted" style="font-size:.74rem" id="histWindow"></span></div><div class="panel-b tscroll" id="histStats"></div></div>
       <div class="panel"><div class="panel-h"><h3 id="fxTitle">FX rate, last 90 days</h3><span class="muted" style="font-size:.74rem">Indicative test rates</span></div><div class="panel-b chart-wrap" id="fxChart"></div></div>
     </div>
-    <div class="panel"><div class="panel-h"><h3>Annotated incidents</h3><span class="muted" style="font-size:.74rem">Cases ops flagged for the model to learn from</span></div><div class="panel-b tscroll" id="histInc"></div></div>
-    <div class="panel"><div class="panel-h"><h3>All cases</h3><span class="muted" style="font-size:.74rem" id="histCount"></span></div><div class="panel-b tscroll" id="histAll"></div></div>
+    <div class="panel"><div class="panel-h"><h3>Annotated incidents</h3><span class="muted" style="font-size:.74rem">Cases ops flagged for the model to learn from</span></div>
+      <div class="panel-b" style="display:grid;gap:10px">
+        <div class="seg" id="incCats" role="group" aria-label="Filter incidents by cause" style="flex-wrap:wrap;justify-self:start"></div>
+        <div class="tscroll" id="histInc"></div><div id="incMore"></div>
+      </div></div>
+    <div class="panel"><div class="panel-h"><h3>All cases</h3>
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap"><span class="muted" style="font-size:.74rem" id="histCount"></span>
+          <select id="caseRoute" class="input" style="width:auto" aria-label="Filter cases by route"><option value="">All routes</option></select>
+          <select id="caseOutcome" class="input" style="width:auto" aria-label="Filter cases by outcome"><option value="">All outcomes</option><option>Credited</option><option>Repaired</option><option>Returned</option></select></div></div>
+      <div class="panel-b"><div class="tscroll" id="histAll"></div><div id="caseMore"></div></div></div>
   </div>
 </section>
 
@@ -844,48 +854,44 @@ function rail(a,b,r,d){
   return 'SWIFT gpi · pacs.008';
 }
 
-/* ===================== history ===================== */
-const HCACHE={};
-const INCIDENTS={
-  JP:[{date:'2025-10-09',tpl:'GULF',amount:900000,cust:'FI',note:'Released Thursday. Manama closed Friday and Saturday, then US Columbus Day and Japan Sports Day fell on Monday 13 Oct. Credited Tuesday. This case taught the model the Gulf weekend rule.'},
-      {date:'2026-04-28',tpl:'EXP',amount:15000,cust:'Retail',note:'Showa Day on 29 Apr closed the Tokyo clearing bank. Golden Week risk is now a calendar feature.'},
-      {date:'2026-08-06',tpl:'ASIA',amount:42000,cust:'Retail',extra:6,outcome:'Repaired',note:'Lion City raised an RFI on the purpose code. Repaired after 6 h; purpose codes are now validated before release.'},
-      {date:'2026-09-17',tpl:'ECO',amount:600,cust:'Retail',note:'Released Thursday after the 16:00 SGT batch. Waited a full week for the next run.'}],
-  IN:[{date:'2026-09-11',tpl:'EXP',amount:7000,cust:'Retail',note:'Released Friday; reached Mumbai on Saturday 12 Sep, the 2nd Saturday of the month and a bank holiday in India. Credited Monday.'}],
-  AE:[{date:'2026-07-02',tpl:'GULF',amount:120000,cust:'FI',note:'Gulf Crescent closed Friday while Dubai was open. One day lost; the UAE moved to a Saturday–Sunday weekend in 2022, Bahrain did not.'}],
-  SA:[{date:'2026-06-11',tpl:'EXP',amount:30000,cust:'Retail',note:'Released Thursday afternoon US time. Riyadh closed Friday and Saturday; credited Sunday.'}],
-  DE:[{date:'2026-08-28',tpl:'LDN',amount:9000,cust:'Retail',note:'London summer bank holiday on 31 Aug delayed the Thames Commerce leg by one day.'}]
-};
-function caseHistory(cc){
-  if(HCACHE[cc])return HCACHE[cc];
-  const d=DEST[cc],rng=mulberry(cc.charCodeAt(0)*131+cc.charCodeAt(1));const rows=[];
-  const mk=(date,tk,amount,cust,extra,outcome,note)=>{const tpl=TPL[tk],hops=hopsFor(tpl,d);const sim=simulate(hops,tpl,startTime(date));
-    const bps=amount>=250000?tpl.fxL:tpl.fx;const fees=tpl.fees.reduce((a,b)=>a+b,0);const hours=sim.hours*(extra?1:(.85+rng()*.4))+(extra||0);
-    return {date,tpl:tk,amount,cust,hours,cost:fees+amount*bps/1e4,bps,outcome:outcome||'Credited',note:note||'',cal:sim.cal}};
-  for(let i=0;i<120;i++){
-    let k;do{k=addDays(TODAY_KEY,-Math.floor(rng()*540)-3)}while([0,6].includes(parseKey(k).getUTCDay()));
-    let tk=d.tpls[Math.floor(rng()*d.tpls.length)];
-    const fi=rng()<.3;let amount=fi?Math.round(Math.exp(11+rng()*3.2)/1000)*1000:Math.round(Math.exp(5.5+rng()*4.3)/10)*10;
-    if(TPL[tk].cap&&amount>TPL[tk].cap)tk='EXP';
-    const o=rng();rows.push(mk(k,tk,amount,fi?'FI':'Retail',0,o<.03?'Returned':o<.08?'Repaired':'Credited'));
-  }
-  (INCIDENTS[cc]||[]).forEach(x=>rows.push(mk(x.date,x.tpl,x.amount,x.cust,x.extra,x.outcome,x.note)));
-  rows.sort((a,b)=>a.date<b.date?1:-1);
-  HCACHE[cc]=rows;return rows;
+/* ===================== history (served by the CorridorIQ API from the history database) ===================== */
+// API base: ?api=<url> overrides; when the API serves this page itself (port 8000) use the same origin.
+const API_BASE=(()=>{let q=null;try{q=new URLSearchParams(location.search).get('api')}catch(e){}
+  if(q)return q.replace(/\/+$/,'');
+  return location.protocol.startsWith('http')&&location.port==='8000'?location.origin:'http://127.0.0.1:8000'})();
+async function api(path){
+  let r;
+  try{r=await fetch(API_BASE+path)}
+  catch(e){throw new Error(`Cannot reach the CorridorIQ API at ${API_BASE}. Start it from the code folder: python3 -m uvicorn prediction_service.api:app --port 8000`)}
+  if(!r.ok){let m=`${r.status} ${r.statusText}`;try{const j=await r.json();if(j.detail)m=typeof j.detail==='string'?j.detail:j.detail.map(d=>d.msg).join('; ')}catch(e){}throw new Error(m)}
+  return r.json();
 }
-function renderSimilar(){
-  const R=S.res,rows=caseHistory(S.dest),rec=R.el[0];
-  const vdDow=parseKey(S.vd).getUTCDay();
-  const scored=rows.map(x=>({x,s:Math.abs(Math.log(x.amount)-Math.log(S.amount))+(x.cust===S.cust?0:.6)+(x.note?-.5:0)+(parseKey(x.date).getUTCDay()===vdDow?-.3:0)+Math.log(1+.3*Math.max(0,(parseKey(TODAY_KEY)-parseKey(x.date))/864e5)/365)})).sort((a,b)=>a.s-b.s).slice(0,6).map(o=>o.x);
-  const stat=(k)=>{const h=rows.filter(x=>x.tpl===k).map(x=>x.hours).sort((a,b)=>a-b);return h.length?{n:h.length,med:h[Math.floor(h.length/2)]}:null};
-  const st=rec?stat(rec.key):null;
-  $('#similar').innerHTML=`<div class="panel-h"><h3>Similar historical cases</h3><span class="muted" style="font-size:.74rem">Matched on corridor, amount, client type and release weekday</span></div>
-  <div class="panel-b" style="display:grid;gap:10px">
-    ${st?`<p style="font-size:.84rem">Across ${st.n} test cases on <b>${esc(rec.tpl.name)}</b> to ${esc(CNAME[S.dest])}, the median time to credit was <span class="num">${fmtH(st.med)}</span>. The model's estimate for this payment is <span class="num">${fmtH(rec.sim.hours)}</span>.</p>`:''}
-    <div class="tscroll"><table class="data"><thead><tr><th>Released</th><th>Route</th><th class="r">Amount</th><th>Client</th><th class="r">Took</th><th class="r">Cost</th><th>Outcome</th><th>Ops note</th></tr></thead><tbody>
-    ${scored.map(x=>`<tr class="${rec&&x.tpl===rec.key?'hl':''}"><td class="num">${dayLabel(x.date)} ${x.date.slice(0,4)}</td><td>${TPL[x.tpl].name}</td><td class="r num">${usd0(x.amount)}</td><td>${x.cust}</td><td class="r num">${fmtH(x.hours)}</td><td class="r num">${usd0(x.cost)}</td><td><span class="pill ${x.outcome==='Credited'?'good':x.outcome==='Repaired'?'warn':'bad'}">${x.outcome}</span></td><td style="min-width:220px;font-size:.76rem">${esc(x.note)||'<span class="muted">—</span>'}</td></tr>`).join('')}
-    </tbody></table></div>
+const corridorOf=cc=>'USD-'+DEST[cc].ccy;
+const qs=o=>Object.entries(o).filter(([,v])=>v!==null&&v!==undefined&&v!=='').map(([k,v])=>`${k}=${encodeURIComponent(v)}`).join('&');
+const loadingHTML=()=>'<p class="muted" style="font-size:.82rem">Loading…</p>';
+const errorHTML=e=>`<div class="callout bad"><div class="grow"><b>Could not load history.</b> ${esc(e&&e.message||String(e))}</div></div>`;
+const outcomePill=o=>`<span class="pill ${o==='Credited'?'good':o==='Repaired'?'warn':'bad'}">${esc(o)}</span>`;
+const tookH=h=>h==null?'<span class="muted">—</span>':fmtH(h);
+const relDate=k=>`${dayLabel(k)} ${k.slice(0,4)}`;
+const dmy=k=>{const d=parseKey(k);return `${d.getUTCDate()} ${MON[d.getUTCMonth()]} ${d.getUTCFullYear()}`};
+const n0=n=>Number(n).toLocaleString('en-US');
+
+let simReq=0;
+async function renderSimilar(){
+  const R=S.res,rec=R.el[0],el=$('#similar'),cc=S.dest,me=++simReq;
+  const head='<div class="panel-h"><h3>Similar historical cases</h3><span class="muted" style="font-size:.74rem">Matched on corridor, amount, client type, release weekday and recency</span></div>';
+  if(!el.innerHTML.trim())el.innerHTML=`${head}<div class="panel-b">${loadingHTML()}</div>`;
+  try{
+    const d=await api(`/v1/history/corridors/${corridorOf(cc)}/similar-cases?`+qs({amount_usd:S.amount,client_type:S.cust,value_date:S.vd,template_id:rec?rec.key:null}));
+    if(me!==simReq)return;
+    const st=d.route_summary;
+    el.innerHTML=`${head}<div class="panel-b" style="display:grid;gap:10px">
+    ${st&&st.cases&&st.median_hours!=null&&rec?`<p style="font-size:.84rem">Across ${n0(st.cases)} test cases in the last 18 months on <b>${esc(st.route_name)}</b> to ${esc(CNAME[cc])}, the median time to credit was <span class="num">${fmtH(st.median_hours)}</span>${st.low_sample?' (small sample, indicative only)':''}. The model's estimate for this payment is <span class="num">${fmtH(rec.sim.hours)}</span>.</p>`:''}
+    ${d.cases.length?`<div class="tscroll"><table class="data"><thead><tr><th>Released</th><th>Route</th><th class="r">Amount</th><th>Client</th><th class="r">Took</th><th class="r">Cost</th><th>Outcome</th><th>Ops note</th></tr></thead><tbody>
+    ${d.cases.map(x=>`<tr class="${rec&&x.template_id===rec.key?'hl':''}"><td class="num" style="white-space:nowrap">${relDate(x.value_date)}</td><td>${esc(x.route_name)}</td><td class="r num">${usd0(x.amount_usd)}</td><td>${esc(x.client_type)}</td><td class="r num">${tookH(x.hours_to_credit)}</td><td class="r num">${usd0(x.all_in_cost_usd)}</td><td>${outcomePill(x.outcome)}</td><td style="min-width:220px;font-size:.76rem">${esc(x.ops_note)||'<span class="muted">—</span>'}</td></tr>`).join('')}
+    </tbody></table></div>`:'<p class="muted">No historical cases on this corridor yet.</p>'}
   </div>`;
+  }catch(e){if(me===simReq)el.innerHTML=`${head}<div class="panel-b">${errorHTML(e)}</div>`}
 }
 
 /* ===================== approval & tracking ===================== */
@@ -959,36 +965,108 @@ function renderTracker(r,animate){
 }
 
 /* ===================== history tab ===================== */
-function renderHistory(){
-  const cc=$('#histDest').value,d=DEST[cc],rows=caseHistory(cc);
-  const stats=d.tpls.map(k=>{const xs=rows.filter(x=>x.tpl===k);if(!xs.length)return null;const h=xs.map(x=>x.hours).sort((a,b)=>a-b);
-    return {k,n:xs.length,med:h[Math.floor(h.length/2)],p90:h[Math.min(h.length-1,Math.floor(h.length*.9))],bps:Math.round(xs.reduce((a,x)=>a+x.cost/x.amount*1e4,0)/xs.length),stp:xs.filter(x=>x.outcome==='Credited').length/xs.length}}).filter(Boolean);
-  const maxP=Math.max(...stats.map(s=>s.p90));
-  $('#histStats').innerHTML=`<table class="data"><thead><tr><th>Route</th><th class="r">Cases</th><th>Time to credit (median ▮ · P90 ┆)</th><th class="r">Avg cost</th><th class="r">STP</th></tr></thead><tbody>${stats.map(s=>`<tr><td>${TPL[s.k].name}<div class="muted" style="font-size:.72rem">via ${TPL[s.k].via}</div></td><td class="r num">${s.n}</td><td style="min-width:170px"><div style="position:relative;height:14px;background:var(--sunk);border-radius:2px;margin-top:3px"><i style="position:absolute;left:0;top:0;bottom:0;width:${s.med/maxP*100}%;background:var(--speed);border-radius:2px"></i><i style="position:absolute;top:-2px;bottom:-2px;left:${s.p90/maxP*100}%;width:2px;background:var(--ink)"></i></div><div class="num muted" style="font-size:.7rem;margin-top:2px">${fmtH(s.med)} · P90 ${fmtH(s.p90)}</div></td><td class="r num">${s.bps} bps</td><td class="r num">${(s.stp*100).toFixed(0)}%</td></tr>`).join('')}</tbody></table>`;
-  const inc=rows.filter(x=>x.note);
-  $('#histInc').innerHTML=inc.length?`<table class="data"><thead><tr><th>Released</th><th>Route</th><th class="r">Amount</th><th class="r">Took</th><th>What happened</th></tr></thead><tbody>${inc.map(x=>`<tr><td class="num" style="white-space:nowrap">${dayLabel(x.date)} ${x.date.slice(0,4)}</td><td>${TPL[x.tpl].name}</td><td class="r num">${usd0(x.amount)}</td><td class="r num">${fmtH(x.hours)}</td><td style="min-width:260px">${esc(x.note)}</td></tr>`).join('')}</tbody></table>`:'<p class="muted">No annotated incidents for this corridor.</p>';
-  $('#histCount').textContent=`${rows.length} test cases, newest first`;
-  $('#histAll').innerHTML=`<table class="data"><thead><tr><th>Released</th><th>Route</th><th class="r">Amount</th><th>Client</th><th class="r">Took</th><th class="r">Cost</th><th class="r">Non-business days</th><th>Outcome</th></tr></thead><tbody>${rows.slice(0,40).map(x=>`<tr><td class="num" style="white-space:nowrap">${dayLabel(x.date)} ${x.date.slice(0,4)}</td><td>${TPL[x.tpl].name}</td><td class="r num">${usd0(x.amount)}</td><td>${x.cust}</td><td class="r num">${fmtH(x.hours)}</td><td class="r num">${usd0(x.cost)}</td><td class="r num">${x.cal}</td><td><span class="pill ${x.outcome==='Credited'?'good':x.outcome==='Repaired'?'warn':'bad'}">${x.outcome}</span></td></tr>`).join('')}</tbody></table><p class="muted" style="font-size:.74rem;margin-top:8px">Showing the 40 most recent of ${rows.length}.</p>`;
-  renderFx(cc);
+// H.req increases on every corridor change; responses for an older request are dropped.
+const H={corridors:null,req:0,cc:null,ok:false,inc:{category:null,categories:[],items:[],total:0},cases:{route:'',outcome:'',items:[],total:0}};
+const INC_PAGE=20,CASE_PAGE=40;
+const CAT_LABEL={calendar:'Calendar',cutoff:'Cut-off',batch:'Netting batch',repair:'Repair',return:'Return'};
+const CAT_PILL={calendar:'info',cutoff:'info',batch:'info',repair:'warn',return:'bad'};
+
+async function loadHistoryCorridors(){
+  if(H.corridors)return H.corridors;
+  const d=await api('/v1/history/corridors');
+  const sel=$('#histDest'),cur=sel.value;
+  sel.innerHTML=d.corridors.filter(c=>DEST[c.dest_country]).map(c=>`<option value="${esc(c.dest_country)}">USD → ${esc(c.currency_code)} · ${esc(c.country_name)}</option>`).join('');
+  sel.value=cur;if(!sel.value&&sel.options.length)sel.selectedIndex=0;
+  $('#histAsOf').textContent=` Test data from ${dmy(d.corridors.reduce((a,c)=>c.first_value_date<a?c.first_value_date:a,d.window.as_of))} to ${dmy(d.window.as_of)}.`;
+  H.corridors=d;return d;
 }
-function renderFx(cc){
-  const d=DEST[cc],rng=mulberry(cc.charCodeAt(1)*977);const pegged=cc==='AE'||cc==='SA';const n=90,vals=[];let v=d.rate;
-  for(let i=0;i<n;i++){vals.unshift(v);v=pegged?d.rate*(1+(rng()-.5)*.0004):v*(1+(rng()-.5)*.012)}
-  const rets=vals.slice(1).map((x,i)=>Math.log(x/vals[i]));const mu=rets.reduce((a,b)=>a+b,0)/rets.length;const vol=Math.sqrt(rets.reduce((a,b)=>a+(b-mu)**2,0)/rets.length)*Math.sqrt(252)*100;
-  const W=520,H=230,ml=56,mr=16,mt=14,mb=30;const mn=Math.min(...vals),mx=Math.max(...vals),pad=(mx-mn)*.12||d.rate*.001;
-  const x=i=>ml+i/(n-1)*(W-ml-mr),y=v=>mt+(1-(v-(mn-pad))/((mx+pad)-(mn-pad)))*(H-mt-mb);
-  const dp=d.rate>10?2:4;const ticks=[mn,(mn+mx)/2,mx];
+
+async function renderHistory(){
+  const me=++H.req;H.ok=false;
+  ['#histStats','#fxChart','#histInc','#histAll'].forEach(id=>$(id).innerHTML=loadingHTML());
+  ['#incCats','#incMore','#caseMore','#histWindow','#histCount'].forEach(id=>$(id).innerHTML='');
+  try{await loadHistoryCorridors()}
+  catch(e){if(me===H.req)['#histStats','#fxChart','#histInc','#histAll'].forEach(id=>$(id).innerHTML=errorHTML(e));return}
+  if(me!==H.req)return;
+  const cc=$('#histDest').value,cid=corridorOf(cc);H.cc=cc;
+  H.inc={category:null,categories:[],items:[],total:0};H.cases={route:'',outcome:'',items:[],total:0};
+  $('#caseRoute').innerHTML='<option value="">All routes</option>'+DEST[cc].tpls.map(k=>`<option value="${k}">${esc(TPL[k].name)}</option>`).join('');
+  $('#caseOutcome').value='';
+  const panel=(id,path,render)=>api(path).then(d=>{if(me===H.req)render(d)},e=>{if(me===H.req)$(id).innerHTML=errorHTML(e)});
+  panel('#histStats',`/v1/history/corridors/${cid}/route-performance`,d=>{renderRoutePerf(d);H.ok=true});
+  panel('#fxChart',`/v1/history/corridors/${cid}/fx?days=90`,renderFx);
+  loadIncidents(true);loadCases(true);
+}
+
+function renderRoutePerf(d){
+  $('#histWindow').textContent=`${dmy(d.window.window_start)} – ${dmy(d.window.as_of)}`;
+  const rows=d.routes.filter(s=>s.cases>0&&s.median_hours!=null),none=d.routes.filter(s=>!(s.cases>0&&s.median_hours!=null));
+  if(!rows.length){$('#histStats').innerHTML='<p class="muted">No cases on this corridor in the last 18 months.</p>';return}
+  const maxP=Math.max(...rows.map(s=>s.p90_hours));
+  $('#histStats').innerHTML=`<table class="data"><thead><tr><th>Route</th><th class="r">Cases</th><th>Time to credit (median ▮ · P90 ┆)</th><th class="r">Avg cost</th><th class="r">STP</th></tr></thead><tbody>${rows.map(s=>`<tr><td>${esc(s.route_name)}<div class="muted" style="font-size:.72rem">via ${esc(s.via)}</div></td><td class="r num">${n0(s.cases)}${s.low_sample?`<div><span class="pill warn" title="Fewer than ${d.low_sample_threshold} cases: the P90 rests on a few payments">Low sample</span></div>`:''}</td><td style="min-width:170px"><div style="position:relative;height:14px;background:var(--sunk);border-radius:2px;margin-top:3px"><i style="position:absolute;left:0;top:0;bottom:0;width:${s.median_hours/maxP*100}%;background:var(--speed);border-radius:2px"></i><i style="position:absolute;top:-2px;bottom:-2px;left:calc(${s.p90_hours/maxP*100}% - 2px);width:2px;background:var(--ink)"></i></div><div class="num muted" style="font-size:.7rem;margin-top:2px">${fmtH(s.median_hours)} · P90 ${fmtH(s.p90_hours)}</div></td><td class="r num">${s.cost_bps.toFixed(0)} bps</td><td class="r num">${s.stp_pct.toFixed(0)}%</td></tr>`).join('')}</tbody></table>
+  <p class="muted" style="font-size:.72rem;margin-top:8px">Cost is value-weighted (fees + FX margin over value sent). STP = no manual intervention anywhere on the route.${rows.some(s=>s.low_sample)?` Low sample = fewer than ${d.low_sample_threshold} cases; treat as indicative.`:''}${none.length?` No cases in the window: ${none.map(s=>esc(s.route_name)).join(', ')}.`:''}</p>`;
+}
+
+function renderFx(d){
+  const vals=d.points.map(p=>p.mid_rate),n=vals.length,ccy=d.currency_code,pegged=d.pegged_to_usd;
+  $('#fxTitle').textContent=`USD/${ccy}, last ${d.days} days`;
+  if(n<2){$('#fxChart').innerHTML='<p class="muted">Not enough FX history for this corridor.</p>';return}
+  const W=520,H_=230,ml=56,mr=16,mt=14,mb=30;const mn=Math.min(...vals),mx=Math.max(...vals),pad=(mx-mn)*.12||vals[n-1]*.001;
+  const x=i=>ml+i/(n-1)*(W-ml-mr),y=v=>mt+(1-(v-(mn-pad))/((mx+pad)-(mn-pad)))*(H_-mt-mb);
+  const dp=vals[n-1]>10?2:4;const ticks=[mn,(mn+mx)/2,mx];
   const line=vals.map((v,i)=>`${i?'L':'M'}${x(i).toFixed(1)},${y(v).toFixed(1)}`).join(' ');
-  const area=line+` L${x(n-1)},${H-mb} L${x(0)},${H-mb} Z`;
-  const months=[];for(let i=0;i<n;i+=30){const k=addDays(TODAY_KEY,i-n+1);months.push([i,dayLabel(k).slice(4)])}
-  $('#fxTitle').textContent=`USD/${d.ccy}, last 90 days`;
-  $('#fxChart').innerHTML=`<svg viewBox="0 0 ${W} ${H}" width="100%" style="min-width:380px;display:block" role="img" aria-label="USD/${d.ccy} rate over 90 days">
+  const area=line+` L${x(n-1)},${H_-mb} L${x(0)},${H_-mb} Z`;
+  const labels=[];for(let i=0;i<n;i+=30){const k=d.points[i].rate_date,dt=parseKey(k);labels.push([i,`${dt.getUTCDate()} ${MON[dt.getUTCMonth()]}`])}
+  const vol=d.annualised_volatility_pct;
+  $('#fxChart').innerHTML=`<svg viewBox="0 0 ${W} ${H_}" width="100%" style="min-width:380px;display:block" role="img" aria-label="USD/${esc(ccy)} rate over ${d.days} days, from ${vals[0].toFixed(dp)} to ${vals[n-1].toFixed(dp)}">
     ${ticks.map(t=>`<line x1="${ml}" x2="${W-mr}" y1="${y(t)}" y2="${y(t)}" stroke="var(--line)"/><text x="${ml-8}" y="${y(t)+4}" text-anchor="end" font-size="10" fill="var(--muted)">${t.toFixed(dp)}</text>`).join('')}
-    ${months.map(([i,l])=>`<text x="${x(i)}" y="${H-10}" text-anchor="middle" font-size="10" fill="var(--muted)">${l}</text>`).join('')}
+    ${labels.map(([i,l])=>`<text x="${x(i)}" y="${H_-10}" text-anchor="middle" font-size="10" fill="var(--muted)">${l}</text>`).join('')}
     <path d="${area}" fill="var(--accent)" opacity=".1"/><path d="${line}" fill="none" stroke="var(--accent)" stroke-width="1.8"/>
     <circle cx="${x(n-1)}" cy="${y(vals[n-1])}" r="4" fill="var(--accent)"/><text x="${x(n-1)-8}" y="${y(vals[n-1])-9}" text-anchor="end" font-size="11" fill="var(--ink)">${vals[n-1].toFixed(dp)}</text>
-  </svg><p class="muted" style="font-size:.76rem;margin-top:6px">Annualised volatility ${vol.toFixed(1)}%${pegged?' · currency is pegged to USD, so FX timing risk is negligible':'. Volatility enters the model as a feature: higher volatility favours faster conversion.'}</p>`;
+  </svg><p class="muted" style="font-size:.76rem;margin-top:6px">${vol==null?'':`Annualised volatility ${vol.toFixed(1)}%`}${pegged?' · currency is pegged to USD, so FX timing risk is negligible.':'. Volatility enters the model as a feature: higher volatility favours faster conversion.'} Rates to ${dmy(d.points[n-1].rate_date)}.</p>`;
 }
+
+function moreBar(id,shown,total,noun,page,load){
+  const el=$(id);
+  el.innerHTML=total?`<div style="display:flex;gap:10px;align-items:center;margin-top:8px;flex-wrap:wrap"><span class="muted" style="font-size:.74rem">Showing ${n0(shown)} of ${n0(total)} ${noun}.</span>${shown<total?`<button class="btn sm">Load ${n0(Math.min(page,total-shown))} more</button>`:''}</div>`:'';
+  const b=el.querySelector('button');if(b)b.onclick=()=>{b.disabled=true;b.textContent='Loading…';load()};
+}
+
+async function loadIncidents(reset){
+  const me=H.req,I=H.inc,cat=I.category,offset=reset?0:I.items.length;
+  if(reset)$('#histInc').innerHTML=loadingHTML();
+  try{
+    const d=await api(`/v1/history/corridors/${corridorOf(H.cc)}/incidents?`+qs({category:cat,limit:INC_PAGE,offset}));
+    if(me!==H.req||cat!==I.category)return;
+    I.items=reset?d.items:I.items.concat(d.items);I.total=d.total;I.categories=d.categories;
+    renderIncidents();
+  }catch(e){if(me===H.req&&cat===I.category){$('#histInc').innerHTML=errorHTML(e);$('#incMore').innerHTML=''}}
+}
+function renderIncidents(){
+  const I=H.inc,all=I.categories.reduce((a,c)=>a+c.incidents,0);
+  $('#incCats').innerHTML=all?[[null,'All',all],...I.categories.map(c=>[c.category,CAT_LABEL[c.category]||c.category,c.incidents])]
+    .map(([k,l,n])=>`<button data-cat="${k||''}" aria-pressed="${(k||null)===I.category}">${esc(l)} <span class="num">${n0(n)}</span></button>`).join(''):'';
+  $('#histInc').innerHTML=I.items.length?`<table class="data"><thead><tr><th>Released</th><th>Route</th><th class="r">Amount</th><th class="r">Took</th><th>Cause</th><th>What happened</th></tr></thead><tbody>${I.items.map(x=>`<tr><td class="num" style="white-space:nowrap">${relDate(x.value_date)}</td><td>${esc(x.route_name)}</td><td class="r num">${usd0(x.amount_usd)}</td><td class="r num">${tookH(x.hours_to_credit)}</td><td><span class="pill ${CAT_PILL[x.category]||'plain'}" title="${esc(x.cause)}">${esc(CAT_LABEL[x.category]||x.category)}</span></td><td style="min-width:260px">${esc(x.note)}</td></tr>`).join('')}</tbody></table>`:'<p class="muted">No annotated incidents for this corridor.</p>';
+  moreBar('#incMore',I.items.length,I.total,'incidents',INC_PAGE,()=>loadIncidents(false));
+}
+
+async function loadCases(reset){
+  const me=H.req,C=H.cases,key=C.route+'|'+C.outcome,offset=reset?0:C.items.length;
+  if(reset)$('#histAll').innerHTML=loadingHTML();
+  try{
+    const d=await api(`/v1/history/corridors/${corridorOf(H.cc)}/cases?`+qs({route:C.route,outcome:C.outcome,limit:CASE_PAGE,offset}));
+    if(me!==H.req||key!==C.route+'|'+C.outcome)return;
+    C.items=reset?d.items:C.items.concat(d.items);C.total=d.total;
+    renderCases();
+  }catch(e){if(me===H.req&&key===C.route+'|'+C.outcome){$('#histAll').innerHTML=errorHTML(e);$('#caseMore').innerHTML=''}}
+}
+function renderCases(){
+  const C=H.cases,filtered=C.route||C.outcome;
+  $('#histCount').textContent=`${n0(C.total)} ${filtered?'matching ':''}test cases, newest first`;
+  $('#histAll').innerHTML=C.items.length?`<table class="data"><thead><tr><th>Released</th><th>Route</th><th class="r">Amount</th><th>Client</th><th class="r">Took</th><th class="r">Cost</th><th class="r">Non-business days</th><th>Outcome</th></tr></thead><tbody>${C.items.map(x=>`<tr><td class="num" style="white-space:nowrap">${relDate(x.value_date)}</td><td>${esc(x.route_name)}</td><td class="r num">${usd0(x.amount_usd)}</td><td>${esc(x.client_type)}</td><td class="r num">${tookH(x.hours_to_credit)}</td><td class="r num">${usd0(x.all_in_cost_usd)}</td><td class="r num">${x.nonbusiness_days}</td><td>${outcomePill(x.outcome)}</td></tr>`).join('')}</tbody></table>`:`<p class="muted">No cases${filtered?' match these filters':' on this corridor'}.</p>`;
+  moreBar('#caseMore',C.items.length,C.total,'cases',CASE_PAGE,()=>loadCases(false));
+}
+
 function renderFI(){
   const F=[['Calendar exposure (holidays, weekends) per bank',.19],['Cut-off proximity at each hop',.15],['Corridor × amount band',.13],['FX margin tier at conversion bank',.12],['Historical STP rate of the route',.10],['Number of hops',.08],['FX volatility, 30-day',.07],['Release hour and weekday',.06],['Correspondent nostro liquidity',.05],['Compliance risk rating',.05]];
   $('#fiList').innerHTML=F.map(([l,v])=>`<div class="fi"><span>${l}</span><span class="bar"><i style="width:${v/.19*100}%"></i></span><span class="num" style="text-align:right">${(v*100).toFixed(0)}%</span></div>`).join('');
@@ -1018,8 +1096,12 @@ const pick=e=>{const b=e.target.closest('[data-route]');if(!b||!b.dataset.route)
 $('#routes').addEventListener('click',pick);$('#pareto').addEventListener('click',pick);
 document.querySelectorAll('.tab').forEach(t=>t.onclick=()=>{document.querySelectorAll('.tab').forEach(x=>x.setAttribute('aria-selected',x===t));
   $('#view-route').hidden=t.dataset.tab!=='route';$('#view-hist').hidden=t.dataset.tab!=='hist';$('#view-model').hidden=t.dataset.tab!=='model';
-  if(t.dataset.tab==='hist'){$('#histDest').value=S.dest;renderHistory()}});
+  if(t.dataset.tab==='hist'&&(H.cc!==S.dest||!H.ok)){$('#histDest').value=S.dest;renderHistory()}});
 $('#histDest').onchange=renderHistory;
+$('#incCats').onclick=e=>{const b=e.target.closest('[data-cat]');if(!b)return;const c=b.dataset.cat||null;if(c===H.inc.category)return;H.inc.category=c;
+  document.querySelectorAll('#incCats [data-cat]').forEach(x=>x.setAttribute('aria-pressed',x===b));$('#incMore').innerHTML='';loadIncidents(true)};
+$('#caseRoute').onchange=e=>{H.cases.route=e.target.value;$('#caseMore').innerHTML='';loadCases(true)};
+$('#caseOutcome').onchange=e=>{H.cases.outcome=e.target.value;$('#caseMore').innerHTML='';loadCases(true)};
 renderFI();
 loadScenario(0);
 </script>

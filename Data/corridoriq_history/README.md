@@ -13,9 +13,10 @@ Everything here is test data. Banks, BICs, clients, FX rates and outcomes are fi
 | `code/scripts/reference.py` | Banks, corridors, route templates, fees, FX anchors (mirrors the demo portal) |
 | `code/scripts/engine.py` | Banking calendar and hop-by-hop route simulation. This is the core of MVP 1 modules M3 and M6, reusable by the route engine |
 | `code/scripts/generate_history.py` | Builds the database from the reference data |
-| `historical_cases.sql` | Parameterised queries for each panel of the Historical Cases tab and the similar-cases panel |
+| `historical_cases.sql` | Named queries over the views, one or more per panel of the Historical Cases tab and the similar-cases panel; the history API loads them by name |
 | `code/scripts/train_baseline.py` | Trains a LightGBM ranker and regressors on the history, to show the data supports model predictions |
-| `code/prediction_service/` | Prediction service (step 1C): trains and saves the models, serves them through a FastAPI app, plus an HTTP client and an evaluation script that replays the test payments through the API |
+| `code/scripts/apply_views.py` | Recreates the views from `schema.sql` in an existing database, leaving the tables untouched |
+| `code/prediction_service/` | Prediction service (step 1C): trains and saves the models, serves them through a FastAPI app, plus an HTTP client and an evaluation script that replays the test payments through the API. The same app serves the history API and the portal |
 
 ## Quick start
 
@@ -32,11 +33,14 @@ Prediction API (`pip install -r code/requirements.txt`, then from `code/`):
 
 ```bash
 python3 -m prediction_service.train                          # saves models to prediction_service/artifacts/
-python3 -m uvicorn prediction_service.api:app --port 8000    # docs at http://127.0.0.1:8000/docs
+python3 -m uvicorn prediction_service.api:app --port 8000    # portal at http://127.0.0.1:8000/, docs at /docs
 python3 -m prediction_service.evaluate_api                   # replays the test payments through the API
+python3 -m pytest tests -q                                   # history API tests against the database
 ```
 
 `POST /v1/routes/rank` takes the payment (corridor, beneficiary bank, client type, amount, priority, release time, deadline flag). It simulates every route, then returns them ranked with the simulator estimate, the predicted time and cost, the model score and the v1 heuristic score. Routes the payment can't use are listed with their reasons. Use `--train-until all` to train the production model on all history.
+
+The Historical Cases tab and the similar-cases panel read the `/v1/history/...` endpoints (see the table below). Open the portal from the API at `http://127.0.0.1:8000/`. If you open `corridoriq.html` from disk or another local server instead, it calls `http://127.0.0.1:8000`; add `?api=<url>` to point it elsewhere.
 
 `--payments`, `--start`, `--end` and `--seed` control volume, window and reproducibility. The same seed always gives the same database. At 40,000 payments the file is about 65 MB; it scales roughly linearly.
 
@@ -54,7 +58,7 @@ python3 -m prediction_service.evaluate_api                   # replays the test 
 | `bank`, `corridor`, `route_template`, `route_template_hop`, `corridor_route`, `beneficiary_bank`, `bank_closure`, `country`, `currency`, `cause_code` | small | Reference data |
 | `meta` | 11 | Generator version, seed, window and label definition |
 
-Views: `v_case`, `v_route_performance`, `v_incident`, `v_corridor_monthly`, `v_ranking_training`.
+Views: `v_case`, `v_route_performance`, `v_incident`, `v_corridor_monthly`, `v_history_window`, `v_corridor_overview`, `v_route_performance_18m`, `v_fx_corridor`, `v_ranking_training`.
 
 ## How the history is generated
 
@@ -79,17 +83,22 @@ Views: `v_case`, `v_route_performance`, `v_incident`, `v_corridor_monthly`, `v_r
 - **Labels.** `utility` combines realised time and cost, weighted by the payment's priority (0 = cost, 100 = speed). Returns are penalised, as are credits after the client's deadline. `relevance` is 4 for the best realised route, then 3, 2 and 1. The exact formula is in `meta.label_definition`.
 - **Seeded incidents.** The eight incidents described in the portal appear as real cases, for example the Gulf-weekend case of 9 October 2025 and the Showa Day case. Their notes come from the simulation itself.
 
-## Which query feeds which panel
+## Which view, query and endpoint feeds which panel
 
-| Portal panel | Source |
-| --- | --- |
-| Route performance (cases, median, P90, cost, STP) | `historical_cases.sql` query 1, or the all-time `v_route_performance` view |
-| FX rate, last 90 days | Query 2. Volatility is computed in the app from daily log returns |
-| Annotated incidents | Query 3, from the `v_incident` view |
-| All cases | Query 4, from the `v_case` view |
-| Similar historical cases (route tab) | Queries 5 and 6 |
-| Banking calendar (route tab) | Query 7, plus `country.weekend_days` and `bank_closure` |
-| Model training | The `v_ranking_training` view |
+The joins and aggregates live in views (`schema.sql`). `historical_cases.sql` holds named queries (`-- name: ...`) that only filter, order and page those views; the API (`code/prediction_service/history_repository.py`) loads them by name. All endpoints are `GET` under `/v1/history/corridors`.
+
+| Portal panel | View | Named query | Endpoint |
+| --- | --- | --- | --- |
+| Corridor picker, "test data to" date | `v_corridor_overview`, `v_history_window` | `corridors`, `history_window` | `/v1/history/corridors` |
+| Route performance, last 18 months (cases, median, P90, cost, STP, low sample) | `v_route_performance_18m` | `route_performance` | `.../{corridor_id}/route-performance` |
+| FX rate, last 90 days | `v_fx_corridor` | `fx_series` (volatility computed in the API) | `.../{corridor_id}/fx?days=90` |
+| Annotated incidents, with cause filter | `v_incident` | `incidents`, `incident_count`, `incident_categories` | `.../{corridor_id}/incidents?category=&limit=&offset=` |
+| All cases, with route and outcome filters | `v_case` | `cases`, `case_count` | `.../{corridor_id}/cases?route=&outcome=&limit=&offset=` |
+| Similar historical cases (route tab) | `v_case`, `v_route_performance_18m` | `similar_cases`, `route_summary` | `.../{corridor_id}/similar-cases?amount_usd=&client_type=&value_date=&template_id=` |
+| Banking calendar (route tab) | `holiday`, plus `country.weekend_days` and `bank_closure` | `holidays` | not served yet |
+| Model training | `v_ranking_training` | | |
+
+The 18-month window ends at the newest value date in the data, not today, so a fixed extract always reads the same. After changing a view, run `python3 code/scripts/apply_views.py` to recreate the views in an existing database without regenerating it.
 
 ## Model readiness check
 
@@ -110,7 +119,7 @@ Time-to-credit error on routes under 72 hours is 3.4 hours for LightGBM, against
 | 1A Historical data foundation | SQLite schema, reference data, calendars, synthetic history, tab queries, baseline models | Done (this package) |
 | 1B Route engine and rules | `engine.py` reading reference data from SQLite; rules with reason codes; calendar-conflict rule | Next |
 | 1C Prediction service | v1 heuristic score, plus LightGBM ranker and time/cost regressors trained from `v_ranking_training`, with P50/P90 and score explanations. Runs in shadow until real data replaces the synthetic history | In progress: API, ranker and regressors in `code/prediction_service/`; P50/P90 and explanations to do |
-| 1D Console | Route tab on the engine API; Historical Cases tab and similar cases served from SQLite | |
+| 1D Console | Route tab on the engine API; Historical Cases tab and similar cases served from SQLite | In progress: Historical Cases tab and similar cases served by `/v1/history`; Route tab still runs the in-browser engine |
 | 1E Parallel run with the partner bank | Load the bank's exports into the same tables, retrain, and measure agreement with ops | |
 
 **Effect on the wider plan.** MVP 2 shrinks to loading and calibrating on the bank's real data. MVP 4 becomes promoting the model from shadow to live once it has been validated on real outcomes.

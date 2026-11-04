@@ -127,7 +127,7 @@ SEEDS = [
     {"date": "2026-04-28", "corridor": "USD-JPY", "tpl": "EXP", "amount": 15000, "client": "Retail"},
     {"date": "2026-08-06", "corridor": "USD-JPY", "tpl": "ASIA", "amount": 42000, "client": "Retail", "repair": ("RFI_PURPOSE", 6.0)},
     {"date": "2026-09-17", "corridor": "USD-JPY", "tpl": "ECO", "amount": 600, "client": "Retail"},
-    {"date": "2026-09-11", "corridor": "USD-INR", "tpl": "LDN", "amount": 7000, "client": "Retail"},
+    {"date": "2026-09-11", "corridor": "USD-INR", "tpl": "EXP", "amount": 7000, "client": "Retail"},
     {"date": "2026-07-02", "corridor": "USD-AED", "tpl": "GULF", "amount": 120000, "client": "FI"},
     {"date": "2026-06-11", "corridor": "USD-SAR", "tpl": "EXP", "amount": 30000, "client": "Retail"},
     {"date": "2026-08-28", "corridor": "USD-EUR", "tpl": "LDN", "amount": 9000, "client": "Retail"},

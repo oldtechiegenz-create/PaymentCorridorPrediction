@@ -4,6 +4,8 @@
 
 -- 1. Route performance for a corridor since a date (portal: "Route performance, last 18 months")
 --    :since = 18 months before the latest value_date, e.g. '2025-04-01'
+--    low_sample = 1 when a route has fewer than 50 cases: its P90 rests on a handful of payments,
+--    so the tab should show it as indicative only.
 WITH base AS (
   SELECT * FROM payment WHERE corridor_id = :corridor AND value_date >= :since
 ), ranked AS (
@@ -16,7 +18,8 @@ SELECT b.template_id, t.name AS route_name, t.via, COUNT(*) AS cases,
        (SELECT ROUND(h, 1) FROM ranked r WHERE r.template_id = b.template_id AND r.rn = (r.n + 1) / 2) AS median_hours,
        (SELECT ROUND(h, 1) FROM ranked r WHERE r.template_id = b.template_id AND r.rn = MAX(1, CAST(ROUND(0.9 * r.n) AS INTEGER))) AS p90_hours,
        ROUND(SUM(b.all_in_cost_usd) * 10000.0 / SUM(b.amount_usd), 1) AS cost_bps,
-       ROUND(AVG(b.stp) * 100.0, 1) AS stp_pct
+       ROUND(AVG(b.stp) * 100.0, 1) AS stp_pct,
+       CASE WHEN COUNT(*) < 50 THEN 1 ELSE 0 END AS low_sample
 FROM base b JOIN route_template t ON t.template_id = b.template_id
 GROUP BY b.template_id
 ORDER BY median_hours;
@@ -47,7 +50,8 @@ ORDER BY released_at_utc DESC
 LIMIT :limit OFFSET :offset;
 
 -- 5. Similar historical cases for a new request (route tab)
---    Matches the portal's scoring: amount closeness (ratio), same client type, annotated cases first, same release weekday.
+--    Matches the portal's scoring: amount closeness (ratio), same client type, annotated cases first, same release weekday,
+--    and recent cases first (each year of age weighs x1.3, so a two-year-old case needs a much closer amount to rank).
 --    :amount (USD), :client_type ('Retail' or 'FI'), :weekday (0 = Sunday .. 6 = Saturday)
 SELECT value_date, route_name, template_id, amount_usd, client_type, hours_to_credit, all_in_cost_usd, outcome, ops_note
 FROM v_case
@@ -55,7 +59,8 @@ WHERE corridor_id = :corridor
 ORDER BY (MAX(amount_usd / :amount, :amount / amount_usd)
           * CASE WHEN client_type = :client_type THEN 1.0 ELSE 1.82 END
           * CASE WHEN ops_note IS NOT NULL THEN 0.61 ELSE 1.0 END
-          * CASE WHEN CAST(strftime('%w', value_date) AS INTEGER) = :weekday THEN 0.74 ELSE 1.0 END)
+          * CASE WHEN CAST(strftime('%w', value_date) AS INTEGER) = :weekday THEN 0.74 ELSE 1.0 END
+          * (1.0 + 0.3 * (julianday((SELECT MAX(value_date) FROM payment)) - julianday(value_date)) / 365.0))
 LIMIT 6;
 
 -- 6. Median time to credit on one route (sentence above the similar-cases table)

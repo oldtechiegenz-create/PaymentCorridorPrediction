@@ -47,10 +47,10 @@ python3 -m prediction_service.evaluate_api                   # replays the test 
 | `payment` | 40,000 | One settled payment: client, corridor, amount, charges, purpose, priority, route used, fees, FX, outcome, time to credit |
 | `payment_hop` | 151,932 | gpi-style timeline: each bank's arrival, start and finish, fee, status code, and any hold with its reason |
 | `route_candidate` | 188,740 | Every route that was available for each payment: estimate at release and realised outcome, plus a ranking label |
-| `incident` | 3,763 | Ops annotations on delays, repairs and returns (cause code and note) |
+| `incident` | 3,753 | Ops annotations on delays, repairs and returns (cause code and note) |
 | `client` | 4,820 | 4,800 retail senders and 20 corporate or FI clients of the ordering bank |
 | `fx_rate_daily` | 5,165 | Daily mid rates for JPY, INR, AED, SAR and EUR |
-| `holiday` | 629 | Bank holidays for the nine countries on the network, 2023 to 2027 |
+| `holiday` | 613 | Bank holidays for the nine countries on the network, 2023 to 2027 |
 | `bank`, `corridor`, `route_template`, `route_template_hop`, `corridor_route`, `beneficiary_bank`, `bank_closure`, `country`, `currency`, `cause_code` | small | Reference data |
 | `meta` | 11 | Generator version, seed, window and label definition |
 

@@ -1,3 +1,4 @@
+<meta charset="utf-8">
 <title>CorridorIQ Payment Routing</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -855,14 +856,14 @@ function rail(a,b,r,d){
 }
 
 /* ===================== history (served by the CorridorIQ API from the history database) ===================== */
-// API base: ?api=<url> overrides; when the API serves this page itself (port 8000) use the same origin.
+// API base (the Java backend): ?api=<url> overrides; when the backend serves this page itself (port 8000) use the same origin.
 const API_BASE=(()=>{let q=null;try{q=new URLSearchParams(location.search).get('api')}catch(e){}
   if(q)return q.replace(/\/+$/,'');
   return location.protocol.startsWith('http')&&location.port==='8000'?location.origin:'http://127.0.0.1:8000'})();
 async function api(path){
   let r;
   try{r=await fetch(API_BASE+path)}
-  catch(e){throw new Error(`Cannot reach the CorridorIQ API at ${API_BASE}. Start it from the code folder: python3 -m uvicorn prediction_service.api:app --port 8000`)}
+  catch(e){throw new Error(`Cannot reach the CorridorIQ API at ${API_BASE}. Start the backend from code/backend: ./mvnw spring-boot:run`)}
   if(!r.ok){let m=`${r.status} ${r.statusText}`;try{const j=await r.json();if(j.detail)m=typeof j.detail==='string'?j.detail:j.detail.map(d=>d.msg).join('; ')}catch(e){}throw new Error(m)}
   return r.json();
 }

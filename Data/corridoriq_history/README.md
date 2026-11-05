@@ -16,7 +16,8 @@ Everything here is test data. Banks, BICs, clients, FX rates and outcomes are fi
 | `historical_cases.sql` | Named queries over the views, one or more per panel of the Historical Cases tab and the similar-cases panel; the history API loads them by name |
 | `code/scripts/train_baseline.py` | Trains a LightGBM ranker and regressors on the history, to show the data supports model predictions |
 | `code/scripts/apply_views.py` | Recreates the views from `schema.sql` in an existing database, leaving the tables untouched |
-| `code/prediction_service/` | Prediction service (step 1C): trains and saves the models, serves them through a FastAPI app, plus an HTTP client and an evaluation script that replays the test payments through the API. The same app serves the history API and the portal |
+| `code/prediction_service/` | Prediction service (step 1C, Python): trains and saves the models and serves route ranking through a FastAPI app, plus an HTTP client and an evaluation script that replays the test payments through it |
+| `code/backend/` | Java backend (Spring Boot): serves the portal and the history API, and forwards route ranking to the prediction service |
 
 ## Quick start
 
@@ -29,18 +30,25 @@ python3 code/scripts/generate_history.py --payments 40000 --seed 42   # about 30
 python3 code/scripts/train_baseline.py --split 2026-04-01
 ```
 
-Prediction API (`pip install -r code/requirements.txt`, then from `code/`):
+Prediction service (`pip install -r code/requirements.txt`, then from `code/`):
 
 ```bash
 python3 -m prediction_service.train                          # saves models to prediction_service/artifacts/
-python3 -m uvicorn prediction_service.api:app --port 8000    # portal at http://127.0.0.1:8000/, docs at /docs
-python3 -m prediction_service.evaluate_api                   # replays the test payments through the API
-python3 -m pytest tests -q                                   # history API tests against the database
+python3 -m uvicorn prediction_service.api:app --port 8001    # ML API, docs at http://127.0.0.1:8001/docs
+python3 -m prediction_service.evaluate_api                   # replays the test payments through it
+python3 -m pytest tests -q                                   # prediction service tests
 ```
 
-`POST /v1/routes/rank` takes the payment (corridor, beneficiary bank, client type, amount, priority, release time, deadline flag). It simulates every route, then returns them ranked with the simulator estimate, the predicted time and cost, the model score and the v1 heuristic score. Routes the payment can't use are listed with their reasons. Use `--train-until all` to train the production model on all history.
+Backend (Java 21, from `code/backend/`; the wrapper downloads Maven the first time):
 
-The Historical Cases tab and the similar-cases panel read the `/v1/history/...` endpoints (see the table below). Open the portal from the API at `http://127.0.0.1:8000/`. If you open `corridoriq.html` from disk or another local server instead, it calls `http://127.0.0.1:8000`; add `?api=<url>` to point it elsewhere.
+```bash
+./mvnw spring-boot:run      # portal at http://127.0.0.1:8000/
+./mvnw test                 # history API tests against the database, gateway tests
+```
+
+`POST /v1/routes/rank` takes the payment (corridor, beneficiary bank, client type, amount, priority, release time, deadline flag). It simulates every route, then returns them ranked with the simulator estimate, the predicted time and cost, the model score and the v1 heuristic score. Routes the payment can't use are listed with their reasons. The backend offers the same endpoint on port 8000 and forwards it to the prediction service, so other systems only call the backend. Use `--train-until all` to train the production model on all history.
+
+The Historical Cases tab and the similar-cases panel read the backend's `/v1/history/...` endpoints (see the table below). Open the portal from the backend at `http://127.0.0.1:8000/`. If you open `corridoriq.html` from disk or another local server instead, it calls `http://127.0.0.1:8000`; add `?api=<url>` to point it elsewhere.
 
 `--payments`, `--start`, `--end` and `--seed` control volume, window and reproducibility. The same seed always gives the same database. At 40,000 payments the file is about 65 MB; it scales roughly linearly.
 
@@ -85,7 +93,7 @@ Views: `v_case`, `v_route_performance`, `v_incident`, `v_corridor_monthly`, `v_h
 
 ## Which view, query and endpoint feeds which panel
 
-The joins and aggregates live in views (`schema.sql`). `historical_cases.sql` holds named queries (`-- name: ...`) that only filter, order and page those views; the API (`code/prediction_service/history_repository.py`) loads them by name. All endpoints are `GET` under `/v1/history/corridors`.
+The joins and aggregates live in views (`schema.sql`). `historical_cases.sql` holds named queries (`-- name: ...`) that only filter, order and page those views; the Java backend (`code/backend/src/main/java/com/corridoriq/backend/history/HistoryRepository.java`) loads them by name. All endpoints are `GET` under `/v1/history/corridors`.
 
 | Portal panel | View | Named query | Endpoint |
 | --- | --- | --- | --- |

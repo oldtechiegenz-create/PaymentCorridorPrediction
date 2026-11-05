@@ -69,7 +69,7 @@ Views: `v_case`, `v_route_performance`, `v_incident`, `v_corridor_monthly`, `v_h
 
 ## Which view, query and endpoint feeds which panel
 
-The joins and aggregates live in views (`schema.sql`). `historical_cases.sql` holds named queries (`-- name: ...`) that only filter, order and page those views; the API (`code/prediction_service/history_repository.py`) loads them by name. All endpoints are `GET` under `/v1/history/corridors`.
+The joins and aggregates live in views (`schema.sql`). `historical_cases.sql` holds named queries (`-- name: ...`) that only filter, order and page those views; the Java backend (`code/backend/src/main/java/com/corridoriq/backend/history/HistoryRepository.java`) loads them by name. All endpoints are `GET` under `/v1/history/corridors`.
 
 | Portal panel | View | Named query | Endpoint |
 | --- | --- | --- | --- |

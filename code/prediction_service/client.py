@@ -1,4 +1,4 @@
-"""HTTP client for the prediction API, for the CorridorIQ console and other services."""
+"""HTTP client for the prediction service, for evaluation scripts and notebooks (the Java backend has its own)."""
 import requests
 
 
@@ -7,7 +7,7 @@ class PredictionAPIError(RuntimeError):
 
 
 class PredictionClient:
-    def __init__(self, base_url: str = "http://127.0.0.1:8000", timeout: float = 10.0):
+    def __init__(self, base_url: str = "http://127.0.0.1:8001", timeout: float = 10.0):
         self.base_url = base_url.rstrip("/")
         self.timeout = timeout
         self.session = requests.Session()

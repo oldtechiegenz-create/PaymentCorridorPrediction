@@ -1,17 +1,21 @@
 -- Queries behind the portal's Historical Cases tab and the "Similar historical cases" panel.
 --
--- Each query starts with a "-- name: <name>" line; code/prediction_service/history_repository.py
+-- Each query starts with a "-- name: <name>" line; the Java backend (code/backend, HistoryRepository)
 -- loads them by that name, so this file is the single source of the tab's SQL. The joins and
 -- aggregates live in the views (schema.sql: v_corridor_overview, v_route_performance_18m,
 -- v_fx_corridor, v_incident, v_case, v_history_window); the queries only filter, order and page.
 --
--- Named parameters work with Python sqlite3, better-sqlite3 and most drivers.
+-- Named parameters work with Spring's NamedParameterJdbcTemplate, Python sqlite3 and most drivers.
 -- :corridor is a corridor_id such as 'USD-JPY'. Dates are 'YYYY-MM-DD'.
 -- Optional filters are passed as NULL to mean "any".
 
 -- name: history_window
 -- Newest value date in the data and the start of the 18-month reporting window.
 SELECT as_of, window_start FROM v_history_window;
+
+-- name: route_templates
+-- Every route template id; the API accepts these as route filters.
+SELECT template_id FROM route_template ORDER BY template_id;
 
 -- name: corridors
 -- Corridor picker. The API loads this once at startup and also uses it to reject unknown corridors.

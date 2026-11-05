@@ -1,7 +1,7 @@
 """Send the hold-out test payments to the running API and score its answers against what really happened.
 
     cd code
-    python3 -m uvicorn prediction_service.api:app --port 8000     # in another terminal
+    python3 -m uvicorn prediction_service.api:app --port 8001     # in another terminal
     python3 -m prediction_service.evaluate_api                     # all test payments
     python3 -m prediction_service.evaluate_api --limit 500         # quicker
 
@@ -40,7 +40,7 @@ def load_test_set(db: Path, test_from: str, limit: int):
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--url", default="http://127.0.0.1:8000")
+    ap.add_argument("--url", default="http://127.0.0.1:8001", help="prediction service (not the Java backend)")
     ap.add_argument("--db", type=Path, default=DB_PATH)
     ap.add_argument("--test-from", help="first value date to test; default: the model's train_until")
     ap.add_argument("--limit", type=int, default=0, help="number of test payments, 0 = all")

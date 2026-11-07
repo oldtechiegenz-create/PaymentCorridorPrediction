@@ -25,7 +25,7 @@ public class DataSourceConfig {
         Path db = props.dbPath();
         if (!Files.isRegularFile(db)) {
             throw new IllegalStateException("History database not found at " + db
-                    + "; set CORRIDORIQ_DB or generate it with code/scripts/generate_history.py");
+                    + "; set CORRIDORIQ_DB or generate it with GenerateHistory (see code/README.md)");
         }
         SQLiteConfig sqlite = new SQLiteConfig();
         sqlite.setReadOnly(true);

@@ -65,7 +65,7 @@ public class HistoryRepository {
         List<String> missing = REQUIRED_VIEWS.stream().filter(v -> !views.contains(v)).toList();
         if (!missing.isEmpty()) {
             throw new IllegalStateException(props.dbPath() + " lacks views " + String.join(", ", missing)
-                    + "; run python3 code/scripts/apply_views.py");
+                    + "; recreate them with ApplyViews (see code/README.md)");
         }
 
         // The backend only reads the database, so the corridor list, route templates and window are loaded

@@ -10,32 +10,28 @@ Everything here is test data. Banks, BICs, clients, FX rates and outcomes are fi
 | --- | --- |
 | `corridoriq_history.db` | The generated database: 40,000 payments from April 2024 to September 2026 |
 | `schema.sql` | Tables, indexes and views (SQLite 3.25 or later) |
-| `code/scripts/reference.py` | Banks, corridors, route templates, fees, FX anchors (mirrors the demo portal) |
-| `code/scripts/engine.py` | Banking calendar and hop-by-hop route simulation. This is the core of MVP 1 modules M3 and M6, reusable by the route engine |
-| `code/scripts/generate_history.py` | Builds the database from the reference data |
+| `code/backend/.../engine/Reference.java` | Banks, corridors, route templates, fees, FX anchors (mirrors the demo portal) |
+| `code/backend/.../engine/` | Banking calendar and hop-by-hop route simulation (`BankCalendar`, `RouteSimulator`, `RouteEstimator`). This is the core of MVP 1 modules M3 and M6, reusable by the route engine. It replaces the Python `engine.py` |
+| `code/backend/.../generator/GenerateHistory.java` | Builds the database from the reference data (Java; replaces the former `generate_history.py`) |
 | `historical_cases.sql` | Named queries over the views, one or more per panel of the Historical Cases tab and the similar-cases panel; the history API loads them by name |
-| `code/scripts/train_baseline.py` | Trains a LightGBM ranker and regressors on the history, to show the data supports model predictions |
-| `code/scripts/apply_views.py` | Recreates the views from `schema.sql` in an existing database, leaving the tables untouched |
-| `code/prediction_service/` | Prediction service (step 1C, Python): trains and saves the models and serves route ranking through a FastAPI app, plus an HTTP client and an evaluation script that replays the test payments through it |
-| `code/backend/` | Java backend (Spring Boot): serves the portal and the history API, and forwards route ranking to the prediction service |
+| `code/backend/.../generator/ApplyViews.java` | Recreates the views from `schema.sql` in an existing database, leaving the tables untouched |
+| `code/prediction_service/` | Prediction service (step 1C, Python): trains and saves the models and scores routes through a FastAPI app, plus an HTTP client and an evaluation script that replays the test payments through the backend |
+| `code/backend/` | Java backend (Spring Boot): serves the portal and the history API, simulates and ranks the routes of a payment (asking the prediction service for the model scores), and generates the synthetic history |
 
 ## Quick start
 
 ```bash
-pip install holidays            # generator
-pip install lightgbm pandas     # baseline models only
-
-# run from the repository root; the database is written to Data/corridoriq_history/
-python3 code/scripts/generate_history.py --payments 40000 --seed 42   # about 30 seconds
-python3 code/scripts/train_baseline.py --split 2026-04-01
+# 1. Generate the database with the Java backend (from code/backend/; about 15 seconds)
+./mvnw -q compile spring-boot:run \
+  -Dspring-boot.run.main-class=com.corridoriq.backend.generator.GenerateHistory \
+  -Dspring-boot.run.arguments="--payments 40000 --seed 42 --out ../../Data/corridoriq_history/new.db"
 ```
 
 Prediction service (`pip install -r code/requirements.txt`, then from `code/`):
 
 ```bash
-python3 -m prediction_service.train                          # saves models to prediction_service/artifacts/
-python3 -m uvicorn prediction_service.api:app --port 8001    # ML API, docs at http://127.0.0.1:8001/docs
-python3 -m prediction_service.evaluate_api                   # replays the test payments through it
+python3 -m prediction_service.train                          # trains, scores on held-out payments, saves to prediction_service/artifacts/
+python3 -m uvicorn prediction_service.api:app --port 8001    # scoring API, docs at http://127.0.0.1:8001/docs
 python3 -m pytest tests -q                                   # prediction service tests
 ```
 
@@ -46,9 +42,11 @@ Backend (Java 21, from `code/backend/`; the wrapper downloads Maven the first ti
 ./mvnw test                 # history API tests against the database, gateway tests
 ```
 
-`POST /v1/routes/rank` takes the payment (corridor, beneficiary bank, client type, amount, priority, release time, deadline flag). It simulates every route, then returns them ranked with the simulator estimate, the predicted time and cost, the model score and the v1 heuristic score. Routes the payment can't use are listed with their reasons. The backend offers the same endpoint on port 8000 and forwards it to the prediction service, so other systems only call the backend. Use `--train-until all` to train the production model on all history.
+`POST /v1/routes/rank` takes the payment (corridor, beneficiary bank, client type, amount, priority, release time, deadline flag). The backend simulates every route, has the prediction service score the ones the payment can use, and returns them ranked with the simulator estimate, the predicted time and cost, the model score and the v1 heuristic score. Routes the payment can't use are listed with their reasons. Other systems only call the backend. Use `--train-until all` to train the production model on all history.
 
 The Historical Cases tab and the similar-cases panel read the backend's `/v1/history/...` endpoints (see the table below). Open the portal from the backend at `http://127.0.0.1:8000/`. If you open `corridoriq.html` from disk or another local server instead, it calls `http://127.0.0.1:8000`; add `?api=<url>` to point it elsewhere.
+
+The Java backend can generate the same kind of database (`GenerateHistory`, see `code/README.md`) with the same options. Models trained on a Java-generated history score the same as on the Python one: LightGBM picks the best route for 94.4% of held-out payments, against 94.5%.
 
 `--payments`, `--start`, `--end` and `--seed` control volume, window and reproducibility. The same seed always gives the same database. At 40,000 payments the file is about 65 MB; it scales roughly linearly.
 
@@ -106,11 +104,11 @@ The joins and aggregates live in views (`schema.sql`). `historical_cases.sql` ho
 | Banking calendar (route tab) | `holiday`, plus `country.weekend_days` and `bank_closure` | `holidays` | not served yet |
 | Model training | `v_ranking_training` | | |
 
-The 18-month window ends at the newest value date in the data, not today, so a fixed extract always reads the same. After changing a view, run `python3 code/scripts/apply_views.py` to recreate the views in an existing database without regenerating it.
+The 18-month window ends at the newest value date in the data, not today, so a fixed extract always reads the same. After changing a view, run `ApplyViews` (from `code/backend/`: `./mvnw -q compile spring-boot:run -Dspring-boot.run.main-class=com.corridoriq.backend.generator.ApplyViews`) to recreate the views in an existing database without regenerating it.
 
 ## Model readiness check
 
-Results from `train_baseline.py`: trained on payments before 1 April 2026 and tested on 9,665 payments after it.
+Results from `python3 -m prediction_service.train` (the hold-out scores it saves in `metadata.json`): trained on payments before 1 April 2026 and tested on 9,665 payments after it.
 
 | Approach | NDCG@3 | Picks the best route |
 | --- | ---: | ---: |
@@ -125,7 +123,7 @@ Time-to-credit error on routes under 72 hours is 3.4 hours for LightGBM, against
 | Step | Delivers | Status |
 | --- | --- | --- |
 | 1A Historical data foundation | SQLite schema, reference data, calendars, synthetic history, tab queries, baseline models | Done (this package) |
-| 1B Route engine and rules | `engine.py` reading reference data from SQLite; rules with reason codes; calendar-conflict rule | Next |
+| 1B Route engine and rules | Route engine reading reference data from SQLite; rules with reason codes; calendar-conflict rule | In progress: the engine is Java (`RouteSimulator`, `RouteEstimator`) and serves ranking, with ineligibility reasons and the calendar-conflict flag; its reference data is still in `Reference.java`, not read from SQLite |
 | 1C Prediction service | v1 heuristic score, plus LightGBM ranker and time/cost regressors trained from `v_ranking_training`, with P50/P90 and score explanations. Runs in shadow until real data replaces the synthetic history | In progress: API, ranker and regressors in `code/prediction_service/`; P50/P90 and explanations to do |
 | 1D Console | Route tab on the engine API; Historical Cases tab and similar cases served from SQLite | In progress: Historical Cases tab and similar cases served by `/v1/history`; Route tab still runs the in-browser engine |
 | 1E Parallel run with the partner bank | Load the bank's exports into the same tables, retrain, and measure agreement with ops | |

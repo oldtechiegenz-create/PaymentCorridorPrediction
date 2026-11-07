@@ -5,7 +5,6 @@ import pytest
 
 CODE_DIR = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(CODE_DIR))
-sys.path.insert(0, str(CODE_DIR / "scripts"))
 
 from fastapi.testclient import TestClient  # noqa: E402
 

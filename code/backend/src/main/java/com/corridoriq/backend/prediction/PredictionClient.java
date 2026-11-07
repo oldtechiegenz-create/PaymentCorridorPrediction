@@ -18,17 +18,17 @@ import org.springframework.web.client.RestClientResponseException;
 
 import com.corridoriq.backend.config.CorridorIqProperties;
 import com.corridoriq.backend.prediction.PredictionModels.ModelHealth;
-import com.corridoriq.backend.prediction.PredictionModels.PaymentRequest;
-import com.corridoriq.backend.prediction.PredictionModels.RankResponse;
+import com.corridoriq.backend.prediction.PredictionModels.ScoreRequest;
+import com.corridoriq.backend.prediction.PredictionModels.ScoreResponse;
 import com.corridoriq.backend.web.RequestLoggingFilter;
 
 /**
- * HTTP client for the Python prediction service, which hosts the LightGBM ranker and the time/cost
+ * HTTP client for the Python scoring service, which hosts the LightGBM ranker and the time/cost
  * regressors. Uses the application's JSON settings (snake_case) and the configured timeouts. Every call
  * is logged with its outcome and duration, and carries the caller's request id in X-Request-Id.
  */
 @Component
-public class PredictionClient {
+public class PredictionClient implements RouteScorer {
 
     private static final Logger log = LoggerFactory.getLogger(PredictionClient.class);
 
@@ -69,18 +69,18 @@ public class PredictionClient {
                 h -> "model " + h.modelVersion());
     }
 
-    /** Every route of the corridor: eligible ones ranked best first, then ineligible ones with reasons. */
-    public RankResponse rankRoutes(PaymentRequest payment) {
-        log.info("ML POST /v1/routes/rank: {} {} {} USD {} priority {} released {}", payment.corridorId(),
-                payment.beneBankId(), payment.clientType(), payment.amountUsd(), payment.priority(),
-                payment.releasedAt());
-        return call("POST /v1/routes/rank", () -> http.post().uri("/v1/routes/rank")
+    /** Scores the eligible routes of one payment. The routes are ranked by {@link RouteRanker}, not here. */
+    @Override
+    public ScoreResponse score(ScoreRequest request) {
+        PredictionModels.ScorePayment p = request.payment();
+        log.info("ML POST /v1/routes/score: {} {} {} USD {} priority {}, {} routes", p.corridorId(), p.beneBankId(),
+                p.clientType(), p.amountUsd(), p.priority(), request.routes().size());
+        return call("POST /v1/routes/score", () -> http.post().uri("/v1/routes/score")
                         .contentType(MediaType.APPLICATION_JSON)
-                        .body(payment)
+                        .body(request)
                         .retrieve()
-                        .body(RankResponse.class),
-                r -> "recommended " + r.recommendedTemplateId() + " of " + r.routes().size() + " routes, model "
-                        + r.modelVersion());
+                        .body(ScoreResponse.class),
+                r -> "scored " + r.scores().size() + " routes, model " + r.modelVersion());
     }
 
     private <T> T call(String what, Supplier<T> request, Function<T, String> summary) {

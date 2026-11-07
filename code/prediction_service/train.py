@@ -66,7 +66,8 @@ def main():
 
     with closing(sqlite3.connect(a.db)) as conn:
         df = pd.read_sql("SELECT * FROM v_ranking_training WHERE eligible = 1", conn)
-    df = F.add_model_features(df).sort_values(["payment_id", "template_id"])
+        categories = F.load_categories(conn)
+    df = F.add_model_features(df, categories).sort_values(["payment_id", "template_id"])
 
     train_until = None if a.train_until == "all" else a.train_until
     tr = df if train_until is None else df[df.value_date < train_until]
@@ -87,6 +88,7 @@ def main():
         "train_payments": int(tr.payment_id.nunique()),
         "train_rows": int(len(tr)),
         "features": F.FEATURES,
+        "categories": categories,   # the scoring service needs the same codes the models were trained with
         "lightgbm_version": lgb.__version__,
         "holdout": holdout,
     }

@@ -10,20 +10,20 @@ import com.corridoriq.backend.prediction.PredictionModels.PaymentRequest;
 import com.corridoriq.backend.prediction.PredictionModels.RankResponse;
 
 /**
- * Route ranking for one payment. The backend validates the request and forwards it to the Python
- * prediction service, which computes the features and runs the models.
+ * Route ranking for one payment. {@link RouteRanker} validates the request, simulates the routes and has the
+ * Python service score them.
  */
 @RestController
 public class PredictionController {
 
-    private final PredictionClient prediction;
+    private final RouteRanker ranker;
 
-    public PredictionController(PredictionClient prediction) {
-        this.prediction = prediction;
+    public PredictionController(RouteRanker ranker) {
+        this.ranker = ranker;
     }
 
     @PostMapping("/v1/routes/rank")
     public RankResponse rankRoutes(@Valid @RequestBody PaymentRequest payment) {
-        return prediction.rankRoutes(payment);
+        return ranker.rank(payment);
     }
 }

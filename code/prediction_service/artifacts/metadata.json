@@ -28,6 +28,40 @@
     "corr",
     "bene"
   ],
+  "categories": {
+    "template_id": [
+      "ASIA",
+      "ECO",
+      "EXP",
+      "GULF",
+      "LDN",
+      "PAY"
+    ],
+    "corridor_id": [
+      "USD-AED",
+      "USD-EUR",
+      "USD-INR",
+      "USD-JPY",
+      "USD-SAR"
+    ],
+    "bene_bank_id": [
+      "AE_B1",
+      "AE_B2",
+      "AE_B3",
+      "DE_B1",
+      "DE_B2",
+      "DE_B3",
+      "IN_B1",
+      "IN_B2",
+      "IN_B3",
+      "JP_B1",
+      "JP_B2",
+      "JP_B3",
+      "SA_B1",
+      "SA_B2",
+      "SA_B3"
+    ]
+  },
   "lightgbm_version": "4.6.0",
   "holdout": {
     "ops": {

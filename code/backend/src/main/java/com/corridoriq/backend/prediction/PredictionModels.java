@@ -11,8 +11,9 @@ import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Positive;
 
 /**
- * The contract with the Python prediction service (code/prediction_service/schemas.py), in snake_case JSON.
- * Keep the two in step: the Python side is the source of truth for the model's inputs and outputs.
+ * The public ranking API (PaymentRequest, RankResponse) and the internal contract with the Python scoring
+ * service (code/prediction_service/schemas.py), both in snake_case JSON. Keep the scoring records in step with
+ * schemas.py: the Python side is the source of truth for what the models read and return.
  */
 public final class PredictionModels {
 
@@ -20,8 +21,9 @@ public final class PredictionModels {
     }
 
     /**
-     * One payment to rank routes for. The prediction service also checks that the corridor exists and that
-     * the beneficiary bank belongs to it, and returns 422 otherwise.
+     * One payment to rank routes for. {@link RouteRanker} also checks that the corridor exists, that the
+     * beneficiary bank belongs to it and that the banking calendar covers the release date, and returns 422
+     * otherwise.
      *
      * @param priority    0 = cheapest route preferred, 100 = fastest
      * @param releasedAt  release time with an offset, e.g. 2026-04-01T13:01:00Z
@@ -62,6 +64,37 @@ public final class PredictionModels {
     }
 
     /** trainedUntil: the models saw value dates before this; null = all history. */
-    public record ModelHealth(String status, String modelVersion, String trainedUntil, List<Integer> calendarYears) {
+    public record ModelHealth(String status, String modelVersion, String trainedUntil) {
+    }
+
+    // ------------------------------------------------------------------ backend -> scoring service
+
+    /**
+     * The payment-level model inputs, computed by the backend and named as in v_ranking_training.
+     *
+     * @param releaseHourEt New York hour of release with minutes as a fraction, to 2 decimals (13.02)
+     * @param releaseWeekday 0 = Sunday ... 6 = Saturday, on the US value date
+     * @param hasDeadline   1 or 0
+     */
+    public record ScorePayment(String corridorId, String beneBankId, String clientType, double amountUsd, int priority,
+                               double releaseHourEt, int releaseWeekday, int dayOfMonth, int hasDeadline) {
+    }
+
+    /** One eligible route: the simulator's estimate at release, rounded to 2 decimals as stored in route_candidate. */
+    public record RouteFeatures(String templateId, double estHours, double naiveHours, double estCostUsd,
+                                double feeTotalUsd, double fxBps, int hopCount, int intermediaries,
+                                int estNonbusinessDays, int calendarConflict, double cutoffSlackHours, int maxRisk,
+                                double stpRateNominal) {
+    }
+
+    public record ScoreRequest(ScorePayment payment, List<RouteFeatures> routes) {
+    }
+
+    public record RouteScore(String templateId, double modelScore, double predictedHours, double predictedCostUsd,
+                             double heuristicScore) {
+    }
+
+    /** One score per requested route, in the order requested. */
+    public record ScoreResponse(String modelVersion, List<RouteScore> scores) {
     }
 }

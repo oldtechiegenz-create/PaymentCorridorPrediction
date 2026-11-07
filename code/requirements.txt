@@ -1,9 +1,9 @@
-holidays>=0.83
+# Training and serving the models
 numpy>=1.26
 pandas>=2.0
 lightgbm>=4.0
 fastapi>=0.110
 uvicorn>=0.29
-requests>=2.31
+# Tests (httpx is what FastAPI's TestClient uses)
 pytest>=8
 httpx>=0.27

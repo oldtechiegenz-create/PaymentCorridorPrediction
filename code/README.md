@@ -21,6 +21,8 @@ portal (corridoriq.html) ──► Java backend :8000 ──► SQLite history D
 | `notebooks/` | Python | Training walkthrough |
 | `tests/` | Python | Tests of the scoring service |
 
+For worked examples of a payment going through the engine and the models, with real numbers, see [EXAMPLE.md](EXAMPLE.md).
+
 ## Why the features are computed in Java
 
 The models read simulator estimates: how long each route should take given every bank's calendar, cut-offs and fees. The same Java code (`RouteEstimator`) writes those numbers into the history database for training and computes them again when a payment is ranked, so the models never see inputs built a different way from the ones they learned on. Two tests keep that true:

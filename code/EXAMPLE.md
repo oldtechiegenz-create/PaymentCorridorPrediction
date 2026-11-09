@@ -14,6 +14,52 @@ Every number below is real. The examples were run against the backend and the sa
 
 ---
 
+## Templates and routes
+
+The **corridor** is fixed by the payment: money to India travels on USD-INR, whatever happens. What CorridorIQ chooses is the **route**: the chain of banks the money passes through on the way.
+
+### A template is a recipe
+
+A **template** describes one way of moving money, once, in `Reference.java`, so it can be reused for any corridor and any beneficiary bank. Each template holds:
+
+- **the chain of banks**, with placeholders, e.g. Express: `ORIG → NY1 → CLR → BENE`
+- **the fee** at each bank, e.g. $30, $18, $12, $0
+- **the FX margin**, standard and large-ticket, e.g. 38 and 15 bps
+- **the processing hours** at each bank
+- **the rules:** a per-transfer cap, retail clients only, the hop that waits for the Thursday batch
+- **the expected straight-through rate**
+
+There are six:
+
+| Template | Name | Goes via | In short |
+| --- | --- | --- | --- |
+| EXP | Express gpi | New York direct | Fewest hops; highest FX margin |
+| ASIA | Asia hub | Singapore | Asia-session FX, strong in JPY and INR |
+| LDN | Europe hub | London | Strong in EUR and AED |
+| GULF | Gulf hub | Manama | Tightest FX for large amounts; Friday–Saturday weekend |
+| PAY | Payout partner | prefunded local account | Instant payout; retail only, up to $5,000 |
+| ECO | Economy batch | weekly netting, Singapore | Cheapest and slowest; waits for Thursday's batch; up to $25,000 |
+
+Without templates, the same route would have to be described again for every country. "Express" works the same way to Japan, India, the UAE, Saudi Arabia and Germany; only the last two banks change, and `CLR` and `BENE` stand for those.
+
+### A route is the recipe filled in for one payment
+
+A **route** is a template with its placeholders replaced by real banks (`RouteSimulator.resolveHops`): `CLR` by the corridor's clearing bank, `BENE` by the payment's beneficiary bank.
+
+| Template EXP | becomes this route |
+| --- | --- |
+| for USD-JPY to JP_B1 | ORIG → NY1 → **JP_CLR** (Tokyo) → **JP_B1** (Kyoto) |
+| for USD-INR to IN_B2 | ORIG → NY1 → **IN_CLR** (Mumbai) → **IN_B2** (Kochi) |
+
+The same template gives different routes, with different banks, calendars, cut-offs and times, depending on where the money is going. That is why the engine simulates each route separately for every payment.
+
+Two more things:
+
+- **Not every corridor offers every template.** The `corridor_route` table lists them: USD-JPY and USD-INR have all six, USD-AED four, USD-SAR and USD-EUR three.
+- **A route is named by its template.** In the data and the API, a payment's routes are identified by `template_id`, so "route GULF" in an answer means "template GULF, filled in for this payment". That is why the two words often seem interchangeable.
+
+---
+
 ## How one request flows in production
 
 ```
@@ -88,6 +134,16 @@ In the code (`RouteRanker.java`): validation is `validate()`, the engine is call
 | − | ECO | 320.5 | | | | | | | not allowed: Above the $25,000 per-transfer cap |
 
 **Why GULF wins:** it takes about as long as Express (58.5 h against 56 h, both stuck behind the Japanese weekend) but costs **$80 less**, because Gulf Crescent's FX margin is 16 bps against Express's 38 bps. On $30,000 that difference matters. The fastest route of all, the payout partner (1.5 h), was never an option: the engine ruled it out, so the model never saw it.
+
+**Three ways to order these routes.** The engine produces numbers but does not rank. Here is what three possible orderings would give:
+
+| Ordering | How it is made | Order |
+| --- | --- | --- |
+| Fastest first | The engine's `est_hours` alone | EXP (56.0) → GULF (58.5) → ASIA (78.5) → LDN (81.5) |
+| Simple formula (`heuristic_score`) | The engine's time and cost, weighted by the priority (60% time, 40% cost); no learning | **GULF** (−0.070) → EXP (−0.400) → ASIA (−0.677) → LDN (−0.854) |
+| **The model** (`model_score`) | Learned from history; **this is the one Java sorts by** | **GULF** (1.164) → EXP (−0.180) → ASIA (−1.512) → LDN (−2.973) |
+
+Sorted by time alone, Express would come first. The simple formula and the model agree here: GULF is only 2.5 hours slower but $80 cheaper. The formula's score is computed in Python next to the model's and returned for comparison only; it never decides the order. For when the two disagree, see [The model and the simple formula](#the-model-and-the-simple-formula).
 
 **What lines 65–80 of `RouteRanker.java` did here:**
 
@@ -196,6 +252,25 @@ With the Python service stopped:
 | `GET /v1/history/corridors` | 200: the Historical Cases tab keeps working |
 
 The backend never ranks without the model and never guesses. It says clearly what is missing.
+
+---
+
+## The model and the simple formula
+
+Every answer carries two scores per route. The **model score** decides the order. The **simple formula** (`heuristic_score` in `features.py`, the "MVP 1 v1" score) is returned beside it for comparison: it weighs the engine's time and cost by the client's priority and has learned nothing.
+
+They often agree, but not always:
+
+| Example | Simple formula's order | Model's order |
+| --- | --- | --- |
+| 1 ($30,000, Friday) | GULF, EXP, ASIA, LDN | same |
+| 2 ($4,000, Friday) | PAY, ECO, GULF, **ASIA, EXP**, LDN | PAY, ECO, GULF, **EXP, ASIA**, LDN |
+| 3 (priority 0 and 100) | same as the model | ECO first at priority 0, EXP first at 100 |
+| 4 ($900,000, FI) | **GULF and EXP tied** (−0.500 each) | GULF clearly ahead (1.847 against −0.691) |
+| 5 (Showa Day) | PAY, ECO, GULF, ASIA, **LDN, EXP** | PAY, ECO, GULF, ASIA, **EXP, LDN** |
+| 5 (the week before) | same as the model | PAY, ECO, EXP, GULF, ASIA, LDN |
+
+**Where they differ is the model's value.** The formula only knows the timetable. The model has also learned how each bank really behaves: which ones run slow, which ones raise information requests, how month-end backlogs and large-amount screening slow things down. Over all 9,665 held-out payments, the formula picks the route that really turned out best **91.6%** of the time, the model **94.5%**, and the operators before CorridorIQ **80.1%**.
 
 ---
 

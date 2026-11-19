@@ -12,6 +12,26 @@ In short: **the engine decides which routes may be considered, the model decides
 
 Every number below is real. The examples were run against the backend and the saved models (`lgbm-20261101T175656Z`, trained on payments before 1 April 2026). Retraining changes the model scores; the engine's numbers change only if its code or reference data changes.
 
+## Contents
+
+- [Templates and routes](#templates-and-routes)
+- [The whole sequence, step by step](#the-whole-sequence-step-by-step)
+  - [Easy-to-make mistakes about this sequence](#easy-to-make-mistakes-about-this-sequence)
+- [How one request flows in production](#how-one-request-flows-in-production)
+- [The 12 numbers, explained with a $30,000 payment to India](#the-12-numbers-explained-with-a-30000-payment-to-india)
+  - [The 12 numbers for Express, one by one](#the-12-numbers-for-express-one-by-one)
+- [Example 1 — $30,000 on a Friday: the rules remove routes before the model sees them](#example-1--30000-on-a-friday-the-rules-remove-routes-before-the-model-sees-them)
+- [Example 2 — the same payment at $4,000: every route allowed](#example-2--the-same-payment-at-4000-every-route-allowed)
+- [Example 3 — the client's priority decides between cheap and fast](#example-3--the-clients-priority-decides-between-cheap-and-fast)
+- [Example 4 — a large ticket from a financial institution](#example-4--a-large-ticket-from-a-financial-institution)
+- [Example 5 — a holiday changes the ranking](#example-5--a-holiday-changes-the-ranking)
+- [Example 6 — payments refused before the model is asked](#example-6--payments-refused-before-the-model-is-asked)
+- [Example 7 — when the scoring service is down](#example-7--when-the-scoring-service-is-down)
+- [The model and the simple formula](#the-model-and-the-simple-formula)
+- [Around the requests: running it in production](#around-the-requests-running-it-in-production)
+  - [Changing the configuration: adding a beneficiary bank](#changing-the-configuration-adding-a-beneficiary-bank)
+- [Try it yourself](#try-it-yourself)
+
 ---
 
 ## Templates and routes
@@ -60,6 +80,44 @@ Two more things:
 
 ---
 
+## The whole sequence, step by step
+
+What happens to one payment, in order:
+
+| # | Step | Who | Where the information comes from |
+| ---: | --- | --- | --- |
+| 1 | **The API is called** with the payment: corridor, beneficiary bank, client type (Retail or FI), amount, priority, release time, deadline flag | The caller | The request. There is no "source bank": every payment starts at the same ordering bank, Lakeshore Community Bank in Toledo (`ORIG`) |
+| 2 | **Java checks it**: does the corridor exist, does the bank belong to it, is the release date inside the holiday calendar? If not, it answers 422 and stops | Java | Corridors and banks: `Reference.java`. Holiday years: the database's `holiday` table |
+| 3 | **Java gets the corridor's templates**: 6 for USD-INR, 3 for USD-SAR | Java | `Reference.java` |
+| 4 | **Each template becomes one route**: `CLR` and `BENE` are filled in with the corridor's clearing bank and the payment's beneficiary bank | Engine | `Reference.java` |
+| 5 | **The engine removes** the routes this payment may not use (over a cap, retail only), and keeps the reason | Engine | Caps and rules: `Reference.java` |
+| 6 | **The engine computes 12 numbers** for every route, by walking it bank by bank, plus a few numbers about the payment itself | Engine | Fees, FX margins, cut-offs, processing hours: `Reference.java`. Holidays and bank closures: the database |
+| 7 | **The model scores** each remaining route. This is the only machine-learning step | Python | The three model files in `prediction_service/artifacts/` |
+| 8 | **Java sorts by the model's score** (highest first), numbers the routes #1, #2, …, and adds the removed routes at the end with their reasons | Java | The model's scores |
+
+Where things live today:
+
+| Information | Lives in | Notes |
+| --- | --- | --- |
+| Corridors, which templates each offers, banks, fees, FX margins, cut-offs, caps, processing hours | `backend/.../engine/Reference.java` (Java code) | The generator copies them into database tables (`corridor`, `corridor_route`, `bank`, …), which the Historical Cases tab reads. **The ranking engine reads the Java code, not those tables.** The MVP 1B plan is to read them from the database, so a fee change becomes a data change |
+| Holidays | The database's `holiday` table (loaded when the backend starts); `resources/reference/holidays.csv` for generating new databases | Covers 2023–2027 |
+| Ad hoc bank closures | The database's `bank_closure` table | Only the closures someone has entered |
+| The trained models | `prediction_service/artifacts/` | Loaded when the scoring service starts |
+
+### Easy-to-make mistakes about this sequence
+
+| It is easy to think… | In fact… |
+| --- | --- |
+| The corridors come from the database | For ranking, they come from `Reference.java`. The `corridor` table is a copy for the Historical Cases tab |
+| The API receives a source bank and a beneficiary bank | Only the beneficiary bank. The source is always the ordering bank, `ORIG` |
+| The corridor is "filtered" | It is looked up by its ID and checked. A wrong corridor or bank is refused with a 422 before anything else runs |
+| A template is one fixed path | A template is a recipe; each payment fills it in with its own banks, so the same template gives different routes for different corridors and banks |
+| The Java engine puts the routes in an order of preference | **The engine never orders.** It only removes routes and computes numbers. It returns the routes in the corridor's configured order (EXP, ASIA, LDN, GULF, PAY, ECO), which is just the order they are listed in |
+| The model receives the routes | It receives **numbers** about the routes (the 12 below), not the bank chains. It never sees `ORIG → NY1 → …`, only what the engine worked out from it |
+| The model may change Java's order | Java has no order of its own. **The model's score is the only thing that decides the order.** What can differ from the model's order is a simpler ordering, such as "fastest first" or the simple formula, and neither of those is used to decide anything (see [The model and the simple formula](#the-model-and-the-simple-formula)) |
+
+---
+
 ## How one request flows in production
 
 ```
@@ -94,6 +152,116 @@ In the code (`RouteRanker.java`): validation is `validate()`, the engine is call
 | quote $ | engine | Fees + amount × FX margin, from the bank contracts in `Reference.java` |
 | pred h, pred $ | **model** | What the models expect really to happen |
 | score | **model** | The ranker's score. Higher is better. Only comparable within one payment |
+
+The next section explains each of the engine's numbers in detail, with a worked example.
+
+---
+
+## The 12 numbers, explained with a $30,000 payment to India
+
+For every route, the engine produces 12 numbers. They are the main thing the model reads, so they are worth understanding one by one.
+
+**The payment:** USD-INR to Malabar Coast Bank in Kochi (`IN_B2`), retail client, **$30,000**, priority 60, released **Friday 24 April 2026, 10:00 New York time** (19:30 in India).
+
+This weekend was chosen because two calendar rules show up:
+
+- **Saturday 25 April is the 4th Saturday of the month.** Indian banks close on the 2nd and 4th Saturdays (their only regular weekend day is otherwise Sunday).
+- **Bahrain works Sunday to Thursday.** Its weekend is Friday and Saturday, so the Gulf hub is shut on the Friday the payment is sent.
+
+### How the engine walks the Express route
+
+Express for this payment is `ORIG → NY1 → IN_CLR (Mumbai) → IN_B2 (Kochi)`. The engine moves the payment bank by bank, in each bank's own time zone:
+
+```
+ORIG    Fri 10:00 New York → done 10:30                         0.5 h processing
+NY1     Fri 10:30 New York → done 12:00                         1.5 h processing
+IN_CLR  arrives Fri 21:30 India, after its 15:00 cut-off     → waits until Sat 09:00   (11.5 h)
+        Sat 25 is the 4th Saturday, banks closed             → waits until Sun 09:00   (24 h)
+        Sun 26 is Sunday, banks closed                       → waits until Mon 09:00   (24 h)
+        Mon 09:00 → done 11:00                                  2 h processing
+IN_B2   Mon 11:00 → credited 12:30 India                        1.5 h processing
+```
+
+### The 12 numbers for Express, one by one
+
+| # | Number | Value | What it means and how it is worked out |
+| ---: | --- | ---: | --- |
+| | **Time** | | |
+| 1 | `est_hours` | **65.0** | The walk above: from Friday 10:00 New York to Monday 12:30 India. It uses every bank's time zone, cut-off, weekend and holidays |
+| 2 | `naive_hours` | **5.5** | Processing time only: 0.5 + 1.5 + 2 + 1.5. This is what an operator estimated before CorridorIQ, blind to India's cut-off and weekend. Here it is wrong by 59.5 hours. (It only adds a wait if the payment misses the US cut-off or the US is closed) |
+| 3 | `est_nonbusiness_days` | **2** | Closed days the payment sat through on the way: Saturday (4th Saturday) and Sunday |
+| 4 | `calendar_conflict` | **0** | 1 if a **hub** bank (an intermediary) is closed today or tomorrow while New York is open. NY1 is open on Friday; on Saturday it is closed, but so is New York, so that is not a conflict |
+| 5 | `cutoff_slack_hours` | **6.0** | Hours until the ordering bank's 16:00 cut-off: 16:00 − 10:00. A negative number means the payment is already too late for today |
+| | **Cost** | | |
+| 6 | `fee_total_usd` | **60.00** | The fee at each bank on the route: $30 + $18 + $12 + $0 (from the template) |
+| 7 | `fx_bps` | **38** | Express's FX margin in basis points (1 bps = 0.01%). The tighter "large ticket" margin, 15 bps, only applies from $250,000 |
+| 8 | `est_cost_usd` | **174.00** | Fees + amount × margin: 60 + 30,000 × 38 / 10,000 = 60 + 114 |
+| | **Structure and risk** | | |
+| 9 | `hop_count` | **4** | Banks on the route |
+| 10 | `intermediaries` | **2** | Banks between the sender and the beneficiary bank: NY1 and the Mumbai clearing bank |
+| 11 | `max_risk` | **2** | The highest jurisdiction risk on the route, 1 (low) to 3 (high): the New York banks are 1, the Indian banks are 2, and the India corridor itself is 2 |
+| 12 | `stp_rate_nominal` | **0.972** | The template's expected share of payments that go through with no manual repair ("straight-through processing") |
+
+All 12 are rounded to 2 decimals, exactly as they are stored in the training data.
+
+### All six routes side by side
+
+| Number | EXP | ASIA | LDN | GULF | PAY | ECO |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| 1 `est_hours` | 65.0 | 68.0 | 90.5 | 67.5 | 1.5 | 257.5 |
+| 2 `naive_hours` | 5.5 | 12.5 | 11.0 | 14.5 | 1.5 | 87.0 |
+| 3 `est_nonbusiness_days` | 2 | 2 | 2 | **3** | 0 | 3 |
+| 4 `calendar_conflict` | 0 | 0 | 0 | **1** | 0 | 0 |
+| 5 `cutoff_slack_hours` | 6.0 | 6.0 | 6.0 | 6.0 | 6.0 | 6.0 |
+| 6 `fee_total_usd` | 60 | 50 | 58 | 46 | 5 | 4 |
+| 7 `fx_bps` | 38 | 22 | 27 | 16 | 50 | 10 |
+| 8 `est_cost_usd` | 174 | 116 | 139 | **94** | 155 | 34 |
+| 9 `hop_count` | 4 | 5 | 5 | 5 | 3 | 5 |
+| 10 `intermediaries` | 2 | 3 | 3 | 3 | 1 | 3 |
+| 11 `max_risk` | 2 | 2 | 2 | 2 | 2 | 2 |
+| 12 `stp_rate_nominal` | 0.972 | 0.948 | 0.955 | 0.931 | 0.986 | 0.962 |
+| **Sent to the model?** | yes | yes | yes | yes | **no**: over the $5,000 cap | **no**: over the $25,000 cap |
+
+What the numbers say:
+
+- **GULF** is the cheapest allowed route ($94) and almost as fast as Express (67.5 h against 65 h). But it has a **calendar conflict** (Bahrain is shut on Friday) and **3 closed days**: Bahrain's Friday and Saturday, then India's Sunday.
+- **ASIA** goes through Singapore, which is closed on Saturday and Sunday, and reaches Mumbai on Monday morning: 68 h.
+- **LDN** is the slowest bank route (90.5 h): London is already past its 16:00 cut-off on Friday, and on Monday the payment reaches Mumbai after its 15:00 cut-off, so it waits again.
+- **The cut-off slack is the same for every route**, because every route starts at the same ordering bank.
+- **PAY and ECO** get all 12 numbers too, but they are over their caps, so they are never sent to the model. PAY would have taken 1.5 hours; ECO, waiting for Singapore's Thursday batch, 257.5.
+
+### What the model receives
+
+For each of the 4 allowed routes, the 12 numbers above. Once for the payment:
+
+| Payment number | Value | Notes |
+| --- | --- | --- |
+| `amount_usd` | 30000 | The model uses its logarithm (`log_amount`), because amounts range from $50 to $5 million |
+| `client_type` | Retail | The model uses 0 for retail, 1 for an FI client (`is_fi`) |
+| `priority` | 60 | 0 = cheapest preferred, 100 = fastest |
+| `release_hour_et` | 10.0 | Hour of release in New York, with minutes as a fraction (13:30 → 13.5) |
+| `release_weekday` | 5 | Friday (0 = Sunday … 6 = Saturday), on the US date |
+| `day_of_month` | 24 | Month-end payments behave differently |
+| `has_deadline` | 0 | 1 if the client gave an arrive-by date |
+| route, corridor, bank | EXP…, USD-INR, IN_B2 | As **category codes**: fixed integer codes from lists saved with the models |
+
+So the model reads **22 inputs for each route**: 12 from the engine, 7 about the payment, and 3 categories. The derived ones (`log_amount`, `is_fi` and the category codes) are computed in Python by `features.py`, the same way for training and for scoring.
+
+### What the model answered
+
+Real result from the saved models:
+
+| Rank | Route | est h | pred h | quote $ | pred $ | model score | simple formula |
+| ---: | --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| **#1** | **GULF** | 67.5 | 68.1 | 94.00 | 94.72 | **0.884** | −0.068 |
+| #2 | EXP | 65.0 | 65.4 | 174.00 | 173.97 | −0.696 | −0.400 |
+| #3 | ASIA | 68.0 | **72.5** | 116.00 | 115.58 | −1.151 | −0.218 |
+| #4 | LDN | 90.5 | 91.0 | 139.00 | 140.65 | −4.526 | −0.854 |
+| − | PAY | | | | | | not allowed: Above the $5,000 per-transfer cap |
+| − | ECO | | | | | | not allowed: Above the $25,000 per-transfer cap |
+
+- **GULF wins**, as in Example 1: about as fast as Express and $80 cheaper.
+- **The model and the simple formula disagree on #2.** The formula, which only knows the timetable, puts ASIA second. The model puts EXP second, and the reason is visible in its time prediction: it expects ASIA to take **72.5 hours, not the 68 the timetable says**. It learned from history that this route runs slower than planned for India, and so it trusts it less.
 
 ---
 
@@ -285,6 +453,43 @@ They often agree, but not always:
 | **After new history arrives** | Load it into the same tables, run `python3 -m prediction_service.train` (check the `holdout` scores in `metadata.json`), then `--train-until all` for the production models, and restart the scoring service. The backend needs no change | ML |
 | **Continuously** | Compare predicted with real time and cost. A model correction that keeps growing for one bank or route usually means its reference data is out of date | Monitoring |
 
+### Changing the configuration: adding a beneficiary bank
+
+Say the USD-JPY corridor gets a fourth beneficiary bank, `JP_B4`. Three steps are needed, and the third is easy to forget.
+
+**Step 1: describe the bank and add it to the corridor, in `Reference.java`** (two places):
+
+```java
+// 1. Define the bank, next to JP_B1..JP_B3 (around line 220)
+bank("JP_B4", "Seto Inland Bank", "SETOJPJH", "Hiroshima", "JP", "Beneficiary bank", 15, 0, 0, 0, 1, 1.0);
+//    id       name                BIC         city         country role             cut-off      risk speed
+//                                                                                   (all-day, intermediary, non-bank flags: 0)
+
+// 2. Add it to the corridor's banks (around line 234). The shares must still add up to 1.0
+corridor("USD-JPY", ..., List.of(b("JP_B1", .40), b("JP_B2", .30), b("JP_B3", .15), b("JP_B4", .15)), ...);
+```
+
+- **The templates do not change.** Their `BENE` placeholder takes `JP_B4` automatically, so all six routes work for the new bank.
+- The **share** only tells the generator how often synthetic payments go to each bank. The **speed** is the generator's hidden "real pace" of the bank; the engine never uses it. A test (`GeneratorHelpersTest`) checks that every corridor's shares add up to 1.
+
+**Step 2: what happens if you stop here.** The engine would compute the routes for `JP_B4`, but the scoring service would refuse them, and Java would pass the refusal on as a 422:
+
+```
+Unknown bene_bank_id JP_B4; the models know ['AE_B1', ..., 'JP_B3', 'SA_B1', ...]
+```
+
+That is deliberate. The models read the bank as an **integer code** from a fixed list of 15 banks, and `JP_B4` is not on it. Without the check, the model would quietly read `JP_B4` as some other bank.
+
+**Step 3: give the models history with the new bank, and retrain:**
+
+1. Get payment history that includes `JP_B4`: regenerate it with `GenerateHistory`, or, with real data, load the bank's payments. This also writes `JP_B4` into the database's `beneficiary_bank` table, where training reads the bank list from.
+2. Retrain: `python3 -m prediction_service.train`. The bank list grows to 16 and is saved with the models in `metadata.json`.
+3. Restart the scoring service, and the backend for the `Reference.java` change.
+
+**Also:** the portal's "Route a payment" tab has its own bank list in `corridoriq.html` (its browser copy of the engine), so it would need the same change until that tab calls the backend.
+
+**Adding a whole new corridor or country is bigger:** the country (time zone, weekend days), its holidays in the calendar, its clearing bank, its beneficiary banks, the corridor with its templates, and then the same history-and-retraining step.
+
 ### What is still demo, not production
 
 - **The data is synthetic.** The banks, clients and outcomes are generated (`GenerateHistory`). A real deployment loads the bank's own payment history into the same tables. Real history only shows what happened on the route that was used, so the engine (calibrated on real outcomes) has to estimate what the other routes would have done.
@@ -315,3 +520,4 @@ The other examples' payments:
 | 4 | USD-AED | AE_B3 | FI | 900000 | 50 | 2026-04-21T11:00:00-04:00 |
 | 5 | USD-JPY | JP_B1 | Retail | 4000 | 60 | 2026-04-28T15:30:00-04:00 and 2026-04-21T15:30:00-04:00 |
 | 6 | USD-INR / USD-JPY | JP_B1 | Retail | 4000 | 60 | 2026-04-21T15:30:00-04:00 / 2028-04-21T15:30:00-04:00 |
+| The 12 numbers | USD-INR | IN_B2 | Retail | 30000 | 60 | 2026-04-24T10:00:00-04:00 |
